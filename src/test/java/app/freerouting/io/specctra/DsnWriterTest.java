@@ -2,6 +2,7 @@ package app.freerouting.io.specctra;
 
 import app.freerouting.Freerouting;
 import app.freerouting.board.RoutingBoard;
+import app.freerouting.rules.DifferentialPair;
 import app.freerouting.settings.GlobalSettings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,22 @@ class DsnWriterTest {
   }
 
   @Test
+  void roundtripPreservesDifferentialPairMetadata() throws Exception {
+    RoutingBoard original = DsnTestFixtures.loadBoardFromContent(DsnTestFixtures.DSN_WITH_DIFFERENTIAL_PAIR);
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    DsnWriter.write(original, out, "roundtrip-diff-pair", false);
+
+    String content = out.toString(StandardCharsets.UTF_8);
+    assertTrue(content.contains("(pair"), "DSN output must contain pair metadata");
+
+    RoutingBoard reloaded = DsnTestFixtures.loadBoard(out.toByteArray());
+    assertEquals(1, reloaded.rules.differential_pairs.count());
+    DifferentialPair pair = reloaded.rules.differential_pairs.get(0);
+    assertEquals("USB_D+", reloaded.rules.nets.get(pair.first_net_no()).name);
+    assertEquals("USB_D-", reloaded.rules.nets.get(pair.second_net_no()).name);
+  }
+
+  @Test
   void compatModeProducesOutput() throws Exception {
     RoutingBoard board = DsnTestFixtures.loadBoard("Issue143-rpi_splitter.dsn");
     ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -55,4 +72,3 @@ class DsnWriterTest {
     assertTrue(out.size() > 0, "Output stream must contain data after write (flush must have occurred)");
   }
 }
-

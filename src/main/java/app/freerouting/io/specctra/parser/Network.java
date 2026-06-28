@@ -18,6 +18,7 @@ import app.freerouting.rules.BoardRules;
 import app.freerouting.rules.ClearanceMatrix;
 import app.freerouting.rules.DefaultItemClearanceClasses;
 import app.freerouting.rules.DefaultItemClearanceClasses.ItemClass;
+import app.freerouting.rules.DifferentialPair;
 import app.freerouting.rules.ViaInfo;
 import app.freerouting.rules.ViaRule;
 import java.io.IOException;
@@ -47,10 +48,31 @@ public class Network extends ScopeKeyword {
     for (int i = 1; i <= p_par.board.rules.nets.max_net_no(); i++) {
       Net.write_scope(p_par, p_par.board.rules.nets.get(i), board_pins);
     }
+    write_differential_pairs(p_par);
     write_via_infos(p_par.board.rules, p_par.file, p_par.identifier_type);
     write_via_rules(p_par.board.rules, p_par.file, p_par.identifier_type);
     write_net_classes(p_par);
     p_par.file.end_scope();
+  }
+
+  private static void write_differential_pairs(WriteScopeParameter p_par) throws IOException {
+    for (int i = 0; i < p_par.board.rules.differential_pairs.count(); i++) {
+      DifferentialPair curr_pair = p_par.board.rules.differential_pairs.get(i);
+      app.freerouting.rules.Net first_net = p_par.board.rules.nets.get(curr_pair.first_net_no());
+      app.freerouting.rules.Net second_net = p_par.board.rules.nets.get(curr_pair.second_net_no());
+      if (first_net == null || second_net == null) {
+        continue;
+      }
+      p_par.file.start_scope();
+      p_par.file.write("pair ");
+      p_par.file.start_scope();
+      p_par.file.write("nets ");
+      p_par.identifier_type.write(first_net.name, p_par.file);
+      p_par.file.write(" ");
+      p_par.identifier_type.write(second_net.name, p_par.file);
+      p_par.file.end_scope();
+      p_par.file.end_scope();
+    }
   }
 
   public static void write_via_infos(BoardRules p_rules, IndentFileWriter p_file, IdentifierType p_identifier_type) throws IOException {
@@ -506,6 +528,104 @@ public class Network extends ScopeKeyword {
         }
       }
     }
+  }
+
+  private record NetPair(String first_net_name, String second_net_name) {
+  }
+
+  private static boolean is_pair_keyword(Object p_token) {
+    return p_token instanceof String keyword && "pair".equalsIgnoreCase(keyword);
+  }
+
+  private static boolean is_nets_keyword(Object p_token) {
+    return p_token instanceof String keyword && "nets".equalsIgnoreCase(keyword);
+  }
+
+  private static NetPair read_pair_scope(IJFlexScanner p_scanner) {
+    NetPair result = null;
+    Object next_token = null;
+    for (; ; ) {
+      Object prev_token = next_token;
+      try {
+        next_token = p_scanner.next_token();
+      } catch (IOException e) {
+        FRLogger.error("Network.read_pair_scope: IO error scanning file", e);
+        return null;
+      }
+      if (next_token == null) {
+        FRLogger.warn("Network.read_pair_scope: unexpected end of file at '" + p_scanner.get_scope_identifier() + "'");
+        return null;
+      }
+      if (next_token == Keyword.CLOSED_BRACKET) {
+        break;
+      }
+      if (prev_token == Keyword.OPEN_BRACKET) {
+        if (is_nets_keyword(next_token)) {
+          result = read_pair_nets_scope(p_scanner);
+          if (result == null) {
+            return null;
+          }
+        } else {
+          ScopeKeyword.skip_scope(p_scanner);
+        }
+      }
+    }
+    if (result == null) {
+      FRLogger.warn("Network.read_pair_scope: supported net pair descriptor missing at '" + p_scanner.get_scope_identifier() + "'");
+    }
+    return result;
+  }
+
+  private static NetPair read_pair_nets_scope(IJFlexScanner p_scanner) {
+    try {
+      p_scanner.yybegin(SpecctraDsnStreamReader.NAME);
+      Object first_token = p_scanner.next_token();
+      if (!(first_token instanceof String first_net_name)) {
+        FRLogger.warn("Network.read_pair_nets_scope: first net name expected at '" + p_scanner.get_scope_identifier() + "'");
+        return null;
+      }
+      p_scanner.yybegin(SpecctraDsnStreamReader.NAME);
+      Object second_token = p_scanner.next_token();
+      if (!(second_token instanceof String second_net_name)) {
+        FRLogger.warn("Network.read_pair_nets_scope: second net name expected at '" + p_scanner.get_scope_identifier() + "'");
+        return null;
+      }
+      Object next_token = p_scanner.next_token();
+      if (next_token != Keyword.CLOSED_BRACKET) {
+        FRLogger.warn("Network.read_pair_nets_scope: closing bracket expected at '" + p_scanner.get_scope_identifier() + "'");
+        return null;
+      }
+      return new NetPair(first_net_name, second_net_name);
+    } catch (IOException e) {
+      FRLogger.error("Network.read_pair_nets_scope: IO error scanning file", e);
+      return null;
+    }
+  }
+
+  private static void insert_net_pairs(Collection<NetPair> p_net_pairs, BasicBoard p_board) {
+    for (NetPair curr_pair : p_net_pairs) {
+      app.freerouting.rules.Net first_net = get_single_board_net(curr_pair.first_net_name, p_board);
+      app.freerouting.rules.Net second_net = get_single_board_net(curr_pair.second_net_name, p_board);
+      if (first_net == null || second_net == null) {
+        continue;
+      }
+      if (p_board.rules.differential_pairs.add(first_net.net_number, second_net.net_number) == null) {
+        FRLogger.warn("Network.insert_net_pairs: duplicate pair ignored at '" + curr_pair.first_net_name + "," + curr_pair.second_net_name + "'");
+      }
+    }
+  }
+
+  private static app.freerouting.rules.Net get_single_board_net(String p_net_name, BasicBoard p_board) {
+    Collection<app.freerouting.rules.Net> nets = p_board.rules.nets.get(p_net_name);
+    if (nets.isEmpty()) {
+      FRLogger.warn("Network.insert_net_pairs: net not found at '" + p_net_name + "'");
+      return null;
+    }
+    if (nets.size() > 1) {
+      FRLogger.warn("Network.insert_net_pairs: net name has multiple subnets and is ambiguous at '" + p_net_name + "'");
+      return null;
+    }
+    return nets.iterator().next();
   }
 
   private static void insert_class_pair_info(NetClass.ClassClass p_class_class, app.freerouting.rules.NetClass p_first_class, app.freerouting.rules.NetClass p_second_class, BasicBoard p_board,
@@ -982,6 +1102,7 @@ public class Network extends ScopeKeyword {
     Collection<NetClass.ClassClass> class_class_list = new LinkedList<>();
     Collection<ViaInfo> via_infos = new LinkedList<>();
     Collection<Collection<String>> via_rules = new LinkedList<>();
+    Collection<NetPair> net_pairs = new LinkedList<>();
     Object next_token = null;
     for (; ; ) {
       Object prev_token = next_token;
@@ -1026,6 +1147,11 @@ public class Network extends ScopeKeyword {
             return false;
           }
           class_class_list.add(curr_class_class);
+        } else if (is_pair_keyword(next_token)) {
+          NetPair curr_net_pair = read_pair_scope(p_par.scanner);
+          if (curr_net_pair != null) {
+            net_pairs.add(curr_net_pair);
+          }
         } else {
           skip_scope(p_par.scanner);
         }
@@ -1072,6 +1198,7 @@ public class Network extends ScopeKeyword {
     insert_via_rules(via_rules, p_par.board_handling.get_routing_board());
     insert_net_classes(classes, p_par);
     insert_class_pairs(class_class_list, p_par);
+    insert_net_pairs(net_pairs, p_par.board_handling.get_routing_board());
     insert_components(p_par);
     insert_logical_parts(p_par);
     return true;

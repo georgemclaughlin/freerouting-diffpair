@@ -26,6 +26,7 @@ public class BoardRules implements Serializable {
    * Describes the electrical nets on the board.
    */
   public final Nets nets;
+  public DifferentialPairs differential_pairs = new DifferentialPairs();
   public final ViaInfos via_infos = new ViaInfos();
   public final Vector<ViaRule> via_rules = new Vector<>();
   public final NetClasses net_classes = new NetClasses();
@@ -466,5 +467,8 @@ public class BoardRules implements Serializable {
     p_stream.defaultReadObject();
     int snap_angle_no = p_stream.readInt();
     this.trace_angle_restriction = AngleRestriction.valueOf(snap_angle_no);
+    if (this.differential_pairs == null) {
+      this.differential_pairs = new DifferentialPairs();
+    }
   }
 }

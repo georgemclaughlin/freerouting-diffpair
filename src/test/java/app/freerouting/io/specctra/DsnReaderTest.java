@@ -3,6 +3,7 @@ package app.freerouting.io.specctra;
 import app.freerouting.Freerouting;
 import app.freerouting.board.RoutingBoard;
 import app.freerouting.io.BoardReadResult;
+import app.freerouting.rules.DifferentialPair;
 import app.freerouting.settings.GlobalSettings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,34 @@ class DsnReaderTest {
     RoutingBoard board = (RoutingBoard) ((BoardReadResult.Success) result).board();
     assertNotNull(board.communication.specctra_parser_info,
         "SpecctraParserInfo must be populated");
+  }
+
+  @Test
+  void readBoardPreservesSpecctraDifferentialPairMetadata() throws Exception {
+    RoutingBoard board = DsnTestFixtures.loadBoardFromContent(DsnTestFixtures.DSN_WITH_DIFFERENTIAL_PAIR);
+
+    assertEquals(1, board.rules.differential_pairs.count(),
+        "Expected one parsed SPECCTRA differential pair");
+    DifferentialPair pair = board.rules.differential_pairs.get(0);
+    assertEquals("USB_D+", board.rules.nets.get(pair.first_net_no()).name);
+    assertEquals("USB_D-", board.rules.nets.get(pair.second_net_no()).name);
+  }
+
+  @Test
+  void readBoardDifferentialPairMetadataSurvivesBoardSerialization() throws Exception {
+    RoutingBoard board = DsnTestFixtures.loadBoardFromContent(DsnTestFixtures.DSN_WITH_DIFFERENTIAL_PAIR);
+
+    RoutingBoard copy = (RoutingBoard) RoutingBoard.deserialize(board.serialize(false));
+
+    assertNotNull(copy.rules.differential_pairs);
+    assertEquals(1, copy.rules.differential_pairs.count());
+  }
+
+  @Test
+  void readBoardSkipsUnsupportedDifferentialPairDescriptors() throws Exception {
+    RoutingBoard board = DsnTestFixtures.loadBoardFromContent(DsnTestFixtures.DSN_WITH_UNSUPPORTED_PAIR_DESCRIPTOR);
+
+    assertEquals(0, board.rules.differential_pairs.count());
   }
 
   // Parse-error path

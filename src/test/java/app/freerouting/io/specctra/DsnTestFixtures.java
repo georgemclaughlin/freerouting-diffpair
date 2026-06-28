@@ -17,6 +17,28 @@ import java.nio.file.Path;
  */
 public final class DsnTestFixtures {
 
+  static final String DSN_WITH_DIFFERENTIAL_PAIR =
+      "(pcb diff-pair-test\n"
+          + "  (parser (string_quote \"))\n"
+          + "  (resolution um 10)\n"
+          + "  (unit um)\n"
+          + "  (structure\n"
+          + "    (layer F.Cu (type signal) (property (index 0)))\n"
+          + "    (layer B.Cu (type signal) (property (index 1)))\n"
+          + "    (boundary\n"
+          + "      (path pcb 0  0 0  50000 0  50000 30000  0 30000  0 0)\n"
+          + "    )\n"
+          + "  )\n"
+          + "  (network\n"
+          + "    (net USB_D+)\n"
+          + "    (net USB_D-)\n"
+          + "    (pair (nets USB_D+ USB_D-))\n"
+          + "  )\n"
+          + ")\n";
+
+  static final String DSN_WITH_UNSUPPORTED_PAIR_DESCRIPTOR =
+      DSN_WITH_DIFFERENTIAL_PAIR.replace("(pair (nets USB_D+ USB_D-))", "(pair (wire USB_D+ USB_D-))");
+
   private DsnTestFixtures() {
   }
 
@@ -55,6 +77,10 @@ public final class DsnTestFixtures {
    */
   static RoutingBoard loadBoard(byte[] bytes) throws IOException {
     return loadBoardFromStream(new ByteArrayInputStream(bytes));
+  }
+
+  static RoutingBoard loadBoardFromContent(String content) throws IOException {
+    return loadBoardFromStream(new ByteArrayInputStream(content.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
   }
 
   // -------------------------------------------------------------------------
