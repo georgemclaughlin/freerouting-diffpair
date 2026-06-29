@@ -39,6 +39,11 @@ public final class DsnTestFixtures {
   static final String DSN_WITH_UNSUPPORTED_PAIR_DESCRIPTOR =
       DSN_WITH_DIFFERENTIAL_PAIR.replace("(pair (nets USB_D+ USB_D-))", "(pair (wire USB_D+ USB_D-))");
 
+  static final String DSN_WITH_SCOPED_DIFFERENTIAL_PAIR =
+      DSN_WITH_DIFFERENTIAL_PAIR.replace(
+          "(pair (nets USB_D+ USB_D-))",
+          "(pair (nets USB_D+ USB_D-) (pins U1-14 R6-2 U1-13 R7-2))");
+
   private DsnTestFixtures() {
   }
 

@@ -69,6 +69,18 @@ class DsnReaderTest {
   }
 
   @Test
+  void readBoardPreservesScopedDifferentialPairPins() throws Exception {
+    RoutingBoard board = DsnTestFixtures.loadBoardFromContent(DsnTestFixtures.DSN_WITH_SCOPED_DIFFERENTIAL_PAIR);
+
+    DifferentialPair pair = board.rules.differential_pairs.get(0);
+    assertTrue(pair.has_scoped_pins());
+    assertEquals("U1-14", pair.first_from_pin());
+    assertEquals("R6-2", pair.first_to_pin());
+    assertEquals("U1-13", pair.second_from_pin());
+    assertEquals("R7-2", pair.second_to_pin());
+  }
+
+  @Test
   void readBoardSkipsUnsupportedDifferentialPairDescriptors() throws Exception {
     RoutingBoard board = DsnTestFixtures.loadBoardFromContent(DsnTestFixtures.DSN_WITH_UNSUPPORTED_PAIR_DESCRIPTOR);
 

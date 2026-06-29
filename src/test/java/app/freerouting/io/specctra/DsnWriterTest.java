@@ -56,6 +56,24 @@ class DsnWriterTest {
   }
 
   @Test
+  void roundtripPreservesScopedDifferentialPairPins() throws Exception {
+    RoutingBoard original = DsnTestFixtures.loadBoardFromContent(DsnTestFixtures.DSN_WITH_SCOPED_DIFFERENTIAL_PAIR);
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    DsnWriter.write(original, out, "roundtrip-scoped-diff-pair", false);
+
+    String content = out.toString(StandardCharsets.UTF_8);
+    assertTrue(content.contains("(pins"), "DSN output must contain scoped pair pins");
+
+    RoutingBoard reloaded = DsnTestFixtures.loadBoard(out.toByteArray());
+    DifferentialPair pair = reloaded.rules.differential_pairs.get(0);
+    assertTrue(pair.has_scoped_pins());
+    assertEquals("U1-14", pair.first_from_pin());
+    assertEquals("R6-2", pair.first_to_pin());
+    assertEquals("U1-13", pair.second_from_pin());
+    assertEquals("R7-2", pair.second_to_pin());
+  }
+
+  @Test
   void compatModeProducesOutput() throws Exception {
     RoutingBoard board = DsnTestFixtures.loadBoard("Issue143-rpi_splitter.dsn");
     ByteArrayOutputStream out = new ByteArrayOutputStream();

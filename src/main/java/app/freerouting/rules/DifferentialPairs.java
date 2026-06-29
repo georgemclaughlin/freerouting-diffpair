@@ -34,10 +34,26 @@ public class DifferentialPairs implements Serializable {
   }
 
   public DifferentialPair add(int p_first_net_no, int p_second_net_no) {
+    return add(p_first_net_no, p_second_net_no, null, null, null, null);
+  }
+
+  public DifferentialPair add(
+      int p_first_net_no,
+      int p_second_net_no,
+      String p_first_from_pin,
+      String p_first_to_pin,
+      String p_second_from_pin,
+      String p_second_to_pin) {
     if (contains(p_first_net_no, p_second_net_no)) {
       return null;
     }
-    DifferentialPair result = new DifferentialPair(p_first_net_no, p_second_net_no);
+    DifferentialPair result = new DifferentialPair(
+        p_first_net_no,
+        p_second_net_no,
+        p_first_from_pin,
+        p_first_to_pin,
+        p_second_from_pin,
+        p_second_to_pin);
     pair_arr.add(result);
     return result;
   }

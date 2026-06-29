@@ -3,6 +3,7 @@ package app.freerouting.management;
 import app.freerouting.Freerouting;
 import app.freerouting.autoroute.BatchAutorouter;
 import app.freerouting.autoroute.BatchOptimizer;
+import app.freerouting.autoroute.DifferentialPairAutorouter;
 import app.freerouting.autoroute.NamedAlgorithm;
 import app.freerouting.autoroute.events.BoardUpdatedEvent;
 import app.freerouting.autoroute.events.BoardUpdatedEventListener;
@@ -183,6 +184,18 @@ public class RoutingJobSchedulerActionThread extends StoppableThread {
         }
       });
       optimizer.runBatchLoop();
+      job.stage = RoutingStage.IDLE;
+    }
+
+    if (job.board != null
+        && job.board.rules != null
+        && job.board.rules.differential_pairs.count() > 0
+        && !job.thread.isStopRequested()) {
+      job.stage = RoutingStage.OPTIMIZATION;
+      int adjustedPairs = new DifferentialPairAutorouter(job).run();
+      if (adjustedPairs > 0) {
+        setJobOutput(job);
+      }
       job.stage = RoutingStage.IDLE;
     }
 

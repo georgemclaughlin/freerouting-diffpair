@@ -71,8 +71,31 @@ public class Network extends ScopeKeyword {
       p_par.file.write(" ");
       p_par.identifier_type.write(second_net.name, p_par.file);
       p_par.file.end_scope();
+      if (curr_pair.has_scoped_pins()) {
+        p_par.file.start_scope();
+        p_par.file.write("pins ");
+        write_pair_pin_identifier(p_par, curr_pair.first_from_pin());
+        p_par.file.write(" ");
+        write_pair_pin_identifier(p_par, curr_pair.first_to_pin());
+        p_par.file.write(" ");
+        write_pair_pin_identifier(p_par, curr_pair.second_from_pin());
+        p_par.file.write(" ");
+        write_pair_pin_identifier(p_par, curr_pair.second_to_pin());
+        p_par.file.end_scope();
+      }
       p_par.file.end_scope();
     }
+  }
+
+  private static void write_pair_pin_identifier(WriteScopeParameter p_par, String p_pin_identifier) throws IOException {
+    int separatorIndex = p_pin_identifier.indexOf('-');
+    if (separatorIndex <= 0 || separatorIndex >= p_pin_identifier.length() - 1) {
+      p_par.identifier_type.write(p_pin_identifier, p_par.file);
+      return;
+    }
+    p_par.identifier_type.write(p_pin_identifier.substring(0, separatorIndex), p_par.file);
+    p_par.file.write("-");
+    p_par.identifier_type.write(p_pin_identifier.substring(separatorIndex + 1), p_par.file);
   }
 
   public static void write_via_infos(BoardRules p_rules, IndentFileWriter p_file, IdentifierType p_identifier_type) throws IOException {
@@ -530,7 +553,16 @@ public class Network extends ScopeKeyword {
     }
   }
 
-  private record NetPair(String first_net_name, String second_net_name) {
+  private record NetPair(
+      String first_net_name,
+      String second_net_name,
+      String first_from_pin,
+      String first_to_pin,
+      String second_from_pin,
+      String second_to_pin) {
+  }
+
+  private record PairPins(String first_from_pin, String first_to_pin, String second_from_pin, String second_to_pin) {
   }
 
   private static boolean is_pair_keyword(Object p_token) {
@@ -541,8 +573,13 @@ public class Network extends ScopeKeyword {
     return p_token instanceof String keyword && "nets".equalsIgnoreCase(keyword);
   }
 
+  private static boolean is_pins_keyword(Object p_token) {
+    return p_token == Keyword.PINS || p_token instanceof String keyword && "pins".equalsIgnoreCase(keyword);
+  }
+
   private static NetPair read_pair_scope(IJFlexScanner p_scanner) {
     NetPair result = null;
+    PairPins scopedPins = null;
     Object next_token = null;
     for (; ; ) {
       Object prev_token = next_token;
@@ -565,6 +602,17 @@ public class Network extends ScopeKeyword {
           if (result == null) {
             return null;
           }
+          if (scopedPins != null) {
+            result = with_pair_pins(result, scopedPins);
+          }
+        } else if (is_pins_keyword(next_token)) {
+          scopedPins = read_pair_pins_scope(p_scanner);
+          if (scopedPins == null) {
+            return null;
+          }
+          if (result != null) {
+            result = with_pair_pins(result, scopedPins);
+          }
         } else {
           ScopeKeyword.skip_scope(p_scanner);
         }
@@ -574,6 +622,16 @@ public class Network extends ScopeKeyword {
       FRLogger.warn("Network.read_pair_scope: supported net pair descriptor missing at '" + p_scanner.get_scope_identifier() + "'");
     }
     return result;
+  }
+
+  private static NetPair with_pair_pins(NetPair p_pair, PairPins p_pins) {
+    return new NetPair(
+        p_pair.first_net_name,
+        p_pair.second_net_name,
+        p_pins.first_from_pin,
+        p_pins.first_to_pin,
+        p_pins.second_from_pin,
+        p_pins.second_to_pin);
   }
 
   private static NetPair read_pair_nets_scope(IJFlexScanner p_scanner) {
@@ -595,11 +653,52 @@ public class Network extends ScopeKeyword {
         FRLogger.warn("Network.read_pair_nets_scope: closing bracket expected at '" + p_scanner.get_scope_identifier() + "'");
         return null;
       }
-      return new NetPair(first_net_name, second_net_name);
+      return new NetPair(first_net_name, second_net_name, null, null, null, null);
     } catch (IOException e) {
       FRLogger.error("Network.read_pair_nets_scope: IO error scanning file", e);
       return null;
     }
+  }
+
+  private static PairPins read_pair_pins_scope(IJFlexScanner p_scanner) {
+    String firstFromPin = read_pin_identifier(p_scanner);
+    String firstToPin = read_pin_identifier(p_scanner);
+    String secondFromPin = read_pin_identifier(p_scanner);
+    String secondToPin = read_pin_identifier(p_scanner);
+    if (firstFromPin == null || firstToPin == null || secondFromPin == null || secondToPin == null) {
+      FRLogger.warn("Network.read_pair_pins_scope: four scoped pin identifiers expected at '" + p_scanner.get_scope_identifier() + "'");
+      return null;
+    }
+    try {
+      Object next_token = p_scanner.next_token();
+      if (next_token != Keyword.CLOSED_BRACKET) {
+        FRLogger.warn("Network.read_pair_pins_scope: closing bracket expected at '" + p_scanner.get_scope_identifier() + "'");
+        return null;
+      }
+      return new PairPins(firstFromPin, firstToPin, secondFromPin, secondToPin);
+    } catch (IOException e) {
+      FRLogger.error("Network.read_pair_pins_scope: IO error scanning file", e);
+      return null;
+    }
+  }
+
+  private static String read_pin_identifier(IJFlexScanner p_scanner) {
+    String componentName = ((SpecctraDsnStreamReader) p_scanner).next_string(true, '-');
+    if (componentName == null || componentName.isEmpty()) {
+      return null;
+    }
+    try {
+      p_scanner.yybegin(SpecctraDsnStreamReader.SPEC_CHAR);
+      p_scanner.next_token();
+    } catch (IOException e) {
+      FRLogger.error("Network.read_pin_identifier: IO error while scanning pin delimiter", e);
+      return null;
+    }
+    String pinName = p_scanner.next_string(true);
+    if (pinName == null || pinName.isEmpty()) {
+      return null;
+    }
+    return componentName + "-" + pinName;
   }
 
   private static void insert_net_pairs(Collection<NetPair> p_net_pairs, BasicBoard p_board) {
@@ -609,7 +708,13 @@ public class Network extends ScopeKeyword {
       if (first_net == null || second_net == null) {
         continue;
       }
-      if (p_board.rules.differential_pairs.add(first_net.net_number, second_net.net_number) == null) {
+      if (p_board.rules.differential_pairs.add(
+          first_net.net_number,
+          second_net.net_number,
+          curr_pair.first_from_pin,
+          curr_pair.first_to_pin,
+          curr_pair.second_from_pin,
+          curr_pair.second_to_pin) == null) {
         FRLogger.warn("Network.insert_net_pairs: duplicate pair ignored at '" + curr_pair.first_net_name + "," + curr_pair.second_net_name + "'");
       }
     }
