@@ -18,7 +18,7 @@ import java.util.Set;
 
 public class RouterIntentSettings implements Serializable, Cloneable {
   private static final String SCHEMA = "kicad-agent-router-intent";
-  private static final int SCHEMA_VERSION = 1;
+  private static final int SCHEMA_VERSION = 2;
   private static final Set<String> TOP_LEVEL_KEYS = Set.of(
       "schema",
       "schema_version",
@@ -27,7 +27,8 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       "net_intents",
       "critical_paths",
       "differential_pairs",
-      "local_support");
+      "local_support",
+      "block_ports");
   private static final Set<String> SETTINGS_KEYS = Set.of(
       "deterministic_seed",
       "single_thread_default",
@@ -50,6 +51,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       "critical_path_ids",
       "differential_pair_ids",
       "local_support_ids",
+      "block_port_ids",
       "source_copper_ids");
   private static final Set<String> CRITICAL_PATH_KEYS = Set.of(
       "id",
@@ -84,6 +86,20 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       "preferred_layers",
       "max_distance_mm",
       "max_return_distance_mm");
+  private static final Set<String> BLOCK_PORT_KEYS = Set.of(
+      "id",
+      "block",
+      "port",
+      "kind",
+      "net",
+      "pad_ref",
+      "x_mm",
+      "y_mm",
+      "boundary_name",
+      "boundary_center_x_mm",
+      "boundary_center_y_mm",
+      "boundary_width_mm",
+      "boundary_height_mm");
   private static final Set<String> PRIORITY_VALUES = Set.of("normal", "high", "critical");
   private static final Set<String> SCOPE_VALUES = Set.of("normal", "local", "global");
   private static final Set<String> RIPUP_PROTECTION_VALUES = Set.of(
@@ -101,6 +117,11 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       "shield_return",
       "usb2_diff_pair",
       "usb_series_resistor_placement");
+  private static final Set<String> BLOCK_PORT_KIND_VALUES = Set.of(
+      "power_input",
+      "power_output",
+      "ground",
+      "signal");
 
   @SerializedName("intent_file")
   public String intentFile;
@@ -120,6 +141,8 @@ public class RouterIntentSettings implements Serializable, Cloneable {
   public DifferentialPairIntent[] differentialPairs;
   @SerializedName("local_support")
   public LocalSupportIntent[] localSupport;
+  @SerializedName("block_ports")
+  public BlockPortIntent[] blockPorts;
 
   private transient Map<String, NetIntent> netIntentByName;
 
@@ -164,6 +187,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     validateArrayObjectKeys(root, "critical_paths", CRITICAL_PATH_KEYS);
     validateArrayObjectKeys(root, "differential_pairs", DIFFERENTIAL_PAIR_KEYS);
     validateArrayObjectKeys(root, "local_support", LOCAL_SUPPORT_KEYS);
+    validateArrayObjectKeys(root, "block_ports", BLOCK_PORT_KEYS);
     validateArrayStringValues(root, "net_intents", "priority", PRIORITY_VALUES);
     validateArrayStringValues(root, "net_intents", "scope", SCOPE_VALUES);
     validateArrayStringValues(root, "net_intents", "ripup_protection", RIPUP_PROTECTION_VALUES);
@@ -171,6 +195,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     validateArrayStringValues(root, "differential_pairs", "priority", PRIORITY_VALUES);
     validateArrayStringValues(root, "local_support", "kind", LOCAL_SUPPORT_KIND_VALUES);
     validateArrayStringValues(root, "local_support", "priority", PRIORITY_VALUES);
+    validateArrayStringValues(root, "block_ports", "kind", BLOCK_PORT_KIND_VALUES);
   }
 
   private static void validateArrayObjectKeys(JsonObject root, String field, Set<String> allowedKeys) {
@@ -266,6 +291,10 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return intent != null && intent.scope == Scope.LOCAL;
   }
 
+  public boolean hasLocalConfinementIntent(String netName) {
+    return hasLocalScopeIntent(netName) || hasBlockPortIntent(netName);
+  }
+
   public LocalSupportIntent[] localSupportForNet(String netName) {
     if (netName == null || this.localSupport == null || this.localSupport.length == 0) {
       return new LocalSupportIntent[0];
@@ -278,6 +307,24 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       }
     }
     return result.toArray(new LocalSupportIntent[0]);
+  }
+
+  public boolean hasBlockPortIntent(String netName) {
+    return blockPortsForNet(netName).length > 0;
+  }
+
+  public BlockPortIntent[] blockPortsForNet(String netName) {
+    if (netName == null || this.blockPorts == null || this.blockPorts.length == 0) {
+      return new BlockPortIntent[0];
+    }
+
+    List<BlockPortIntent> result = new ArrayList<>();
+    for (BlockPortIntent blockPort : this.blockPorts) {
+      if (blockPort != null && netName.equals(blockPort.net)) {
+        result.add(blockPort);
+      }
+    }
+    return result.toArray(new BlockPortIntent[0]);
   }
 
   public boolean hasPreferredLayerIntent(String netName) {
@@ -359,6 +406,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       result.criticalPaths = this.criticalPaths != null ? this.criticalPaths.clone() : null;
       result.differentialPairs = this.differentialPairs != null ? this.differentialPairs.clone() : null;
       result.localSupport = this.localSupport != null ? this.localSupport.clone() : null;
+      result.blockPorts = this.blockPorts != null ? this.blockPorts.clone() : null;
       result.rebuildNetIntentIndex();
       return result;
     } catch (CloneNotSupportedException e) {
@@ -415,6 +463,8 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     public String[] differentialPairIds;
     @SerializedName("local_support_ids")
     public String[] localSupportIds;
+    @SerializedName("block_port_ids")
+    public String[] blockPortIds;
     @SerializedName("source_copper_ids")
     public String[] sourceCopperIds;
 
@@ -500,6 +550,35 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     public Double maxReturnDistanceMm;
   }
 
+  public static class BlockPortIntent implements Serializable {
+    @SerializedName("id")
+    public String id;
+    @SerializedName("block")
+    public String block;
+    @SerializedName("port")
+    public String port;
+    @SerializedName("kind")
+    public BlockPortKind kind;
+    @SerializedName("net")
+    public String net;
+    @SerializedName("pad_ref")
+    public String padRef;
+    @SerializedName("x_mm")
+    public Double xMm;
+    @SerializedName("y_mm")
+    public Double yMm;
+    @SerializedName("boundary_name")
+    public String boundaryName;
+    @SerializedName("boundary_center_x_mm")
+    public Double boundaryCenterXMm;
+    @SerializedName("boundary_center_y_mm")
+    public Double boundaryCenterYMm;
+    @SerializedName("boundary_width_mm")
+    public Double boundaryWidthMm;
+    @SerializedName("boundary_height_mm")
+    public Double boundaryHeightMm;
+  }
+
   public enum RouteOrder {
     @SerializedName("priority_then_local_scope")
     PRIORITY_THEN_LOCAL_SCOPE
@@ -576,5 +655,16 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     USB2_DIFF_PAIR,
     @SerializedName("usb_series_resistor_placement")
     USB_SERIES_RESISTOR_PLACEMENT
+  }
+
+  public enum BlockPortKind {
+    @SerializedName("power_input")
+    POWER_INPUT,
+    @SerializedName("power_output")
+    POWER_OUTPUT,
+    @SerializedName("ground")
+    GROUND,
+    @SerializedName("signal")
+    SIGNAL
   }
 }

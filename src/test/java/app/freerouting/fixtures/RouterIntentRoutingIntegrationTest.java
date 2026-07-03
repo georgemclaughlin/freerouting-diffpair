@@ -23,11 +23,17 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
   private static final String STEERED_NET = "Net-(J1-Pin_1)";
   private static final String RIPUP_FIXTURE = "router-intent-ripup-cost.dsn";
   private static final String LOCAL_SCOPE_CORRIDOR_FIXTURE = "router-intent-local-scope-corridor.dsn";
+  private static final String BLOCK_BOUNDARY_FIXTURE = "router-intent-design-block-boundary.dsn";
   private static final String LOCAL_NET = "LOCAL";
+  private static final String BLOCK_NET = "BLOCK_NET";
   private static final double LOCAL_SCOPE_MARGIN_MM = 15.0;
   private static final double LOCAL_LEFT_PAD_X_UM = 10000.0;
   private static final double LOCAL_RIGHT_PAD_X_UM = 90000.0;
   private static final double LOCAL_PAD_Y_UM = -35000.0;
+  private static final double BLOCK_BOUNDARY_CENTER_X_MM = 50.0;
+  private static final double BLOCK_BOUNDARY_CENTER_Y_MM = -35.0;
+  private static final double BLOCK_BOUNDARY_WIDTH_MM = 110.0;
+  private static final double BLOCK_BOUNDARY_HEIGHT_MM = 30.0;
 
   @Test
   void preferredLayerIntentChangesRoutedGeometry() {
@@ -110,6 +116,26 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
         "expected lower-excursion local route to accept a longer in-region corridor");
   }
 
+  @Test
+  void blockPortBoundaryIntentReducesRouteExcursion() {
+    RouterIntentSettings blockIntent = blockPortBoundaryIntent(BLOCK_NET);
+    RoutingJob baseline = routeWithIntent(BLOCK_BOUNDARY_FIXTURE, null, BLOCK_NET, 0);
+    RoutingJob bounded = routeWithIntent(BLOCK_BOUNDARY_FIXTURE, blockIntent, BLOCK_NET, 0);
+
+    double baselineExcursion = routedBlockBoundaryExcursionMm(baseline, BLOCK_NET);
+    double boundedExcursion = routedBlockBoundaryExcursionMm(bounded, BLOCK_NET);
+
+    assertTrue(
+        boundedExcursion < baselineExcursion,
+        "expected design-block boundary intent to choose lower-excursion geometry; baseline="
+            + baselineExcursion
+            + ", bounded="
+            + boundedExcursion);
+    assertTrue(
+        routedLength(bounded, BLOCK_NET) > routedLength(baseline, BLOCK_NET),
+        "expected boundary-confined route to accept a longer in-block corridor");
+  }
+
   private RoutingJob routeWithIntent(RouterIntentSettings intent) {
     return routeWithIntent(FIXTURE, intent, STEERED_NET, 1);
   }
@@ -189,6 +215,54 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
     return intent;
   }
 
+  private RouterIntentSettings blockPortBoundaryIntent(String netName) {
+    RouterIntentSettings.NetIntent netIntent = new RouterIntentSettings.NetIntent();
+    netIntent.net = netName;
+    netIntent.priority = RouterIntentSettings.Priority.NORMAL;
+    netIntent.scope = RouterIntentSettings.Scope.NORMAL;
+    netIntent.ripupProtection = RouterIntentSettings.RipupProtection.NONE;
+    netIntent.blockPortIds = new String[] {
+        "block_port_1_main_power_input",
+        "block_port_2_main_power_output"
+    };
+
+    RouterIntentSettings.BlockPortIntent input = blockPortIntent(
+        "block_port_1_main_power_input",
+        netName,
+        "input",
+        "P_IN.1");
+    RouterIntentSettings.BlockPortIntent output = blockPortIntent(
+        "block_port_2_main_power_output",
+        netName,
+        "output",
+        "P_OUT.1");
+
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.netIntents = new RouterIntentSettings.NetIntent[] { netIntent };
+    intent.blockPorts = new RouterIntentSettings.BlockPortIntent[] { input, output };
+    return intent;
+  }
+
+  private RouterIntentSettings.BlockPortIntent blockPortIntent(
+      String id,
+      String netName,
+      String portName,
+      String padRef) {
+    RouterIntentSettings.BlockPortIntent blockPort = new RouterIntentSettings.BlockPortIntent();
+    blockPort.id = id;
+    blockPort.block = "main_power";
+    blockPort.port = portName;
+    blockPort.kind = RouterIntentSettings.BlockPortKind.SIGNAL;
+    blockPort.net = netName;
+    blockPort.padRef = padRef;
+    blockPort.boundaryName = "main_power_ownership";
+    blockPort.boundaryCenterXMm = BLOCK_BOUNDARY_CENTER_X_MM;
+    blockPort.boundaryCenterYMm = BLOCK_BOUNDARY_CENTER_Y_MM;
+    blockPort.boundaryWidthMm = BLOCK_BOUNDARY_WIDTH_MM;
+    blockPort.boundaryHeightMm = BLOCK_BOUNDARY_HEIGHT_MM;
+    return blockPort;
+  }
+
   private double routedLengthOnLayer(RoutingJob job, String netName, String layerName) {
     Net net = job.board.rules.nets.get(netName, 1);
     int layer = layerIndex(job, layerName);
@@ -221,6 +295,41 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
         (int) Math.floor((LOCAL_PAD_Y_UM - marginUm) * scale),
         (int) Math.ceil((LOCAL_RIGHT_PAD_X_UM + marginUm) * scale),
         (int) Math.ceil((LOCAL_PAD_Y_UM + marginUm) * scale));
+    double mmResolution = job.board.communication.get_resolution(Unit.MM);
+
+    double result = 0.0;
+    for (Trace trace : job.board.get_traces()) {
+      if (!trace.contains_net(net.net_number)) {
+        continue;
+      }
+      FloatPoint[] points = trace instanceof PolylineTrace polylineTrace
+          ? polylineTrace.polyline().corner_approx_arr()
+          : new FloatPoint[] { trace.first_corner().to_float(), trace.last_corner().to_float() };
+      for (FloatPoint point : points) {
+        if (point.x >= localRegion.ll.x
+            && point.x <= localRegion.ur.x
+            && point.y >= localRegion.ll.y
+            && point.y <= localRegion.ur.y) {
+          continue;
+        }
+        result += point.distance(localRegion.nearest_point(point)) / mmResolution;
+      }
+    }
+    return result;
+  }
+
+  private double routedBlockBoundaryExcursionMm(RoutingJob job, String netName) {
+    Net net = job.board.rules.nets.get(netName, 1);
+    double scale = job.board.communication.resolution;
+    double minX = (BLOCK_BOUNDARY_CENTER_X_MM - BLOCK_BOUNDARY_WIDTH_MM / 2.0) * 1000.0;
+    double maxX = (BLOCK_BOUNDARY_CENTER_X_MM + BLOCK_BOUNDARY_WIDTH_MM / 2.0) * 1000.0;
+    double minY = (BLOCK_BOUNDARY_CENTER_Y_MM - BLOCK_BOUNDARY_HEIGHT_MM / 2.0) * 1000.0;
+    double maxY = (BLOCK_BOUNDARY_CENTER_Y_MM + BLOCK_BOUNDARY_HEIGHT_MM / 2.0) * 1000.0;
+    IntBox localRegion = new IntBox(
+        (int) Math.floor(minX * scale),
+        (int) Math.floor(minY * scale),
+        (int) Math.ceil(maxX * scale),
+        (int) Math.ceil(maxY * scale));
     double mmResolution = job.board.communication.get_resolution(Unit.MM);
 
     double result = 0.0;

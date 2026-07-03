@@ -24,7 +24,7 @@ class RouterIntentSettingsTest {
     RouterIntentSettings intent = RouterIntentSettings.load(writePayload("router-intent.json", validPayload()));
 
     assertEquals("kicad-agent-router-intent", intent.schema);
-    assertEquals(1, intent.schemaVersion);
+    assertEquals(2, intent.schemaVersion);
     assertEquals("esp32_air_quality_node", intent.profile);
     assertEquals(RouterIntentSettings.RouteOrder.PRIORITY_THEN_LOCAL_SCOPE, intent.settings.routeOrder);
     assertEquals(
@@ -39,6 +39,8 @@ class RouterIntentSettingsTest {
     assertEquals(2, intent.ripupProtectionRankForNet("ESP_BOOT_LOCAL"));
     assertTrue(intent.hasLocalScopeIntent("ESP_BOOT_LOCAL"));
     assertFalse(intent.hasLocalScopeIntent("3V3"));
+    assertTrue(intent.hasBlockPortIntent("3V3"));
+    assertTrue(intent.hasLocalConfinementIntent("3V3"));
     assertTrue(intent.hasPreferredLayerIntent("3V3"));
     assertTrue(intent.isPreferredLayerForNet("3V3", "F.Cu"));
     assertFalse(intent.isPreferredLayerForNet("3V3", "B.Cu"));
@@ -51,10 +53,14 @@ class RouterIntentSettingsTest {
 
     RouterIntentSettings.LocalSupportIntent[] bootSupport = intent.localSupportForNet("ESP_BOOT_LOCAL");
     RouterIntentSettings.LocalSupportIntent[] powerSupport = intent.localSupportForNet("3V3");
+    RouterIntentSettings.BlockPortIntent[] powerPorts = intent.blockPortsForNet("3V3");
 
     assertEquals(1, bootSupport.length);
     assertEquals("local_support_1_same_net_pad_tie", bootSupport[0].id);
     assertEquals(0, powerSupport.length);
+    assertEquals(1, powerPorts.length);
+    assertEquals("main_power", powerPorts[0].block);
+    assertEquals(RouterIntentSettings.BlockPortKind.POWER_OUTPUT, powerPorts[0].kind);
   }
 
   @Test
@@ -110,7 +116,7 @@ class RouterIntentSettingsTest {
     return """
         {
           "schema": "kicad-agent-router-intent",
-          "schema_version": 1,
+          "schema_version": 2,
           "profile": "esp32_air_quality_node",
           "settings": {
             "deterministic_seed": 123,
@@ -134,6 +140,7 @@ class RouterIntentSettingsTest {
               "critical_path_ids": ["esp32_boot_pullup_supply_tie"],
               "differential_pair_ids": [],
               "local_support_ids": [],
+              "block_port_ids": ["block_port_1_main_power_output"],
               "source_copper_ids": []
             },
             {
@@ -151,6 +158,7 @@ class RouterIntentSettingsTest {
               "critical_path_ids": [],
               "differential_pair_ids": [],
               "local_support_ids": ["local_support_1_same_net_pad_tie"],
+              "block_port_ids": [],
               "source_copper_ids": []
             }
           ],
@@ -168,6 +176,23 @@ class RouterIntentSettingsTest {
             }
           ],
           "differential_pairs": [],
+          "block_ports": [
+            {
+              "id": "block_port_1_main_power_output",
+              "block": "main_power",
+              "port": "output",
+              "kind": "power_output",
+              "net": "3V3",
+              "pad_ref": "C3.1",
+              "x_mm": null,
+              "y_mm": null,
+              "boundary_name": "regulator_cluster",
+              "boundary_center_x_mm": 50.0,
+              "boundary_center_y_mm": -35.0,
+              "boundary_width_mm": 110.0,
+              "boundary_height_mm": 30.0
+            }
+          ],
           "local_support": [
             {
               "id": "local_support_1_same_net_pad_tie",

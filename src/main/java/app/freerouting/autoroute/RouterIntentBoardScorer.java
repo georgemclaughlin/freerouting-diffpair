@@ -182,7 +182,7 @@ final class RouterIntentBoardScorer {
     float penalty = 0f;
     for (int netNo = 1; netNo <= board.rules.nets.max_net_no(); netNo++) {
       Net net = board.rules.nets.get(netNo);
-      if (net == null || net.name == null || !intent.hasLocalScopeIntent(net.name)) {
+      if (net == null || net.name == null || !intent.hasLocalConfinementIntent(net.name)) {
         continue;
       }
 

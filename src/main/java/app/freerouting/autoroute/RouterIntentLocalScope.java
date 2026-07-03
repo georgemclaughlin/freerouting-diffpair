@@ -15,19 +15,32 @@ final class RouterIntentLocalScope {
   }
 
   static IntBox localRegion(RoutingBoard board, RouterIntentSettings intent, Net net) {
-    if (board == null || intent == null || net == null || !intent.hasLocalScopeIntent(net.name)) {
+    if (board == null || intent == null || net == null || !intent.hasLocalConfinementIntent(net.name)) {
       return null;
+    }
+
+    double mmResolution = board.communication.get_resolution(Unit.MM);
+    if (mmResolution <= 0) {
+      return null;
+    }
+
+    RegionBounds bounds = new RegionBounds();
+    includeLocalSupportBounds(board, intent, net, mmResolution, bounds);
+    includeBlockPortBounds(intent, net, mmResolution, bounds);
+    return bounds.toBox();
+  }
+
+  private static void includeLocalSupportBounds(
+      RoutingBoard board,
+      RouterIntentSettings intent,
+      Net net,
+      double mmResolution,
+      RegionBounds bounds) {
+    if (!intent.hasLocalScopeIntent(net.name)) {
+      return;
     }
 
     RouterIntentSettings.LocalSupportIntent[] supports = intent.localSupportForNet(net.name);
-    if (supports.length == 0) {
-      return null;
-    }
-
-    int minX = Integer.MAX_VALUE;
-    int minY = Integer.MAX_VALUE;
-    int maxX = Integer.MIN_VALUE;
-    int maxY = Integer.MIN_VALUE;
     int padCount = 0;
     double maxDistanceMm = 0.0;
     for (RouterIntentSettings.LocalSupportIntent support : supports) {
@@ -46,20 +59,42 @@ final class RouterIntentLocalScope {
           continue;
         }
         FloatPoint center = pin.get_center().to_float();
-        minX = Math.min(minX, (int) Math.floor(center.x));
-        minY = Math.min(minY, (int) Math.floor(center.y));
-        maxX = Math.max(maxX, (int) Math.ceil(center.x));
-        maxY = Math.max(maxY, (int) Math.ceil(center.y));
+        bounds.includePoint(center);
         padCount++;
       }
     }
 
     if (padCount == 0 || maxDistanceMm <= 0.0) {
-      return null;
+      return;
     }
 
-    int margin = Math.max(1, (int) Math.ceil(maxDistanceMm * board.communication.get_resolution(Unit.MM)));
-    return new IntBox(minX - margin, minY - margin, maxX + margin, maxY + margin);
+    int margin = Math.max(1, (int) Math.ceil(maxDistanceMm * mmResolution));
+    bounds.expand(margin);
+  }
+
+  private static void includeBlockPortBounds(
+      RouterIntentSettings intent,
+      Net net,
+      double mmResolution,
+      RegionBounds bounds) {
+    for (RouterIntentSettings.BlockPortIntent blockPort : intent.blockPortsForNet(net.name)) {
+      if (blockPort.boundaryCenterXMm == null
+          || blockPort.boundaryCenterYMm == null
+          || blockPort.boundaryWidthMm == null
+          || blockPort.boundaryHeightMm == null
+          || blockPort.boundaryWidthMm <= 0
+          || blockPort.boundaryHeightMm <= 0) {
+        continue;
+      }
+
+      double halfWidth = blockPort.boundaryWidthMm / 2.0;
+      double halfHeight = blockPort.boundaryHeightMm / 2.0;
+      int minX = (int) Math.floor((blockPort.boundaryCenterXMm - halfWidth) * mmResolution);
+      int minY = (int) Math.floor((blockPort.boundaryCenterYMm - halfHeight) * mmResolution);
+      int maxX = (int) Math.ceil((blockPort.boundaryCenterXMm + halfWidth) * mmResolution);
+      int maxY = (int) Math.ceil((blockPort.boundaryCenterYMm + halfHeight) * mmResolution);
+      bounds.includeBox(minX, minY, maxX, maxY);
+    }
   }
 
   static boolean pointInside(IntBox box, FloatPoint point) {
@@ -116,6 +151,49 @@ final class RouterIntentLocalScope {
         return null;
       }
       return new PadRef(value.substring(0, separator), value.substring(separator + 1));
+    }
+  }
+
+  private static final class RegionBounds {
+    private int minX = Integer.MAX_VALUE;
+    private int minY = Integer.MAX_VALUE;
+    private int maxX = Integer.MIN_VALUE;
+    private int maxY = Integer.MIN_VALUE;
+
+    void includePoint(FloatPoint point) {
+      includeBox(
+          (int) Math.floor(point.x),
+          (int) Math.floor(point.y),
+          (int) Math.ceil(point.x),
+          (int) Math.ceil(point.y));
+    }
+
+    void includeBox(int boxMinX, int boxMinY, int boxMaxX, int boxMaxY) {
+      this.minX = Math.min(this.minX, boxMinX);
+      this.minY = Math.min(this.minY, boxMinY);
+      this.maxX = Math.max(this.maxX, boxMaxX);
+      this.maxY = Math.max(this.maxY, boxMaxY);
+    }
+
+    void expand(int margin) {
+      if (!hasBounds()) {
+        return;
+      }
+      this.minX -= margin;
+      this.minY -= margin;
+      this.maxX += margin;
+      this.maxY += margin;
+    }
+
+    IntBox toBox() {
+      if (!hasBounds()) {
+        return null;
+      }
+      return new IntBox(this.minX, this.minY, this.maxX, this.maxY);
+    }
+
+    private boolean hasBounds() {
+      return this.minX <= this.maxX && this.minY <= this.maxY;
     }
   }
 }

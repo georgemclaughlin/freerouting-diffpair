@@ -62,7 +62,7 @@ final class RouterIntentRoutingPolicy {
   }
 
   static double localScopeExitCostFactor(RouterIntentSettings intent, String netName) {
-    return intent != null && intent.hasLocalScopeIntent(netName) ? LOCAL_SCOPE_EXIT_COST_FACTOR : 0.0;
+    return intent != null && intent.hasLocalConfinementIntent(netName) ? LOCAL_SCOPE_EXIT_COST_FACTOR : 0.0;
   }
 
   private static int priorityRank(RouterIntentSettings intent, String netName) {
