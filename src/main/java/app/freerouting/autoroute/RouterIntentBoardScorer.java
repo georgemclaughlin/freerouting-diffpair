@@ -19,6 +19,7 @@ final class RouterIntentBoardScorer {
   private static final float CRITICAL_PATH_EXCESS_LENGTH_PENALTY_POINTS_PER_MM = 10f;
   private static final float DIFFERENTIAL_PAIR_SKEW_PENALTY_POINTS_PER_MM = 20f;
   private static final float LOCAL_SCOPE_EXCURSION_PENALTY_POINTS_PER_MM = 5f;
+  private static final float RETURN_PATH_PLANE_LAYER_PENALTY_POINTS_PER_MM = 8f;
 
   private RouterIntentBoardScorer() {
   }
@@ -35,7 +36,8 @@ final class RouterIntentBoardScorer {
         + protectedViaPenalty(board, intent)
         + criticalPathExcessLengthPenalty(board, intent)
         + differentialPairSkewPenalty(board, intent)
-        + localScopeExcursionPenalty(board, intent);
+        + localScopeExcursionPenalty(board, intent)
+        + returnPathPlaneLayerPenalty(board, intent);
     return Math.max(0f, baseScore - intentPenalty);
   }
 
@@ -206,6 +208,45 @@ final class RouterIntentBoardScorer {
         penalty += excursionMm
             * intentRank(intent, net.name)
             * LOCAL_SCOPE_EXCURSION_PENALTY_POINTS_PER_MM;
+      }
+    }
+    return penalty;
+  }
+
+  static float returnPathPlaneLayerPenalty(RoutingBoard board, RouterIntentSettings intent) {
+    if (board == null || board.rules == null || intent == null || !intent.hasNetIntents()) {
+      return 0f;
+    }
+
+    double mmResolution = board.communication.get_resolution(Unit.MM);
+    if (mmResolution <= 0 || board.layer_structure == null || board.layer_structure.arr == null) {
+      return 0f;
+    }
+
+    float penalty = 0f;
+    for (int netNo = 1; netNo <= board.rules.nets.max_net_no(); netNo++) {
+      Net net = board.rules.nets.get(netNo);
+      if (net == null || net.name == null || !intent.hasPlaneLayerIntent(net.name)) {
+        continue;
+      }
+
+      double planeLayerSignalLengthMm = 0.0;
+      for (Trace trace : board.get_traces()) {
+        int layerIndex = trace.get_layer();
+        if (!trace.contains_net(netNo)
+            || layerIndex < 0
+            || layerIndex >= board.layer_structure.arr.length
+            || board.layer_structure.arr[layerIndex] == null
+            || !intent.isPlaneLayerForNet(net.name, board.layer_structure.arr[layerIndex].name)) {
+          continue;
+        }
+        planeLayerSignalLengthMm += trace.get_length() / mmResolution;
+      }
+
+      if (planeLayerSignalLengthMm > 0) {
+        penalty += planeLayerSignalLengthMm
+            * Math.max(1, intentRank(intent, net.name))
+            * RETURN_PATH_PLANE_LAYER_PENALTY_POINTS_PER_MM;
       }
     }
     return penalty;

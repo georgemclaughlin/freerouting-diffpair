@@ -298,6 +298,24 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return false;
   }
 
+  public boolean hasPlaneLayerIntent(String netName) {
+    NetIntent intent = netIntent(netName);
+    return intent != null && intent.planeLayers != null && intent.planeLayers.length > 0;
+  }
+
+  public boolean isPlaneLayerForNet(String netName, String layerName) {
+    NetIntent intent = netIntent(netName);
+    if (layerName == null || intent == null || intent.planeLayers == null || intent.planeLayers.length == 0) {
+      return false;
+    }
+    for (String planeLayer : intent.planeLayers) {
+      if (layerName.equals(planeLayer)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private NetIntent netIntent(String netName) {
     if (netName == null) {
       return null;

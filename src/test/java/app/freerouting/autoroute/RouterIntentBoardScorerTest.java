@@ -3,6 +3,7 @@ package app.freerouting.autoroute;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import app.freerouting.board.Trace;
 import app.freerouting.board.Unit;
 import app.freerouting.board.Via;
 import app.freerouting.core.RoutingJob;
@@ -124,6 +125,24 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
     assertEquals(Math.max(0f, genericScore - localPenalty), intentScore, 0.001f);
   }
 
+  @Test
+  void penalizesSignalCopperOnDeclaredReturnPlaneLayers() {
+    RoutingJob routed = routedViaFixture(preferredLayerIntent(STEERED_NET, "B.Cu"));
+    RouterIntentSettings returnPlaneIntent = returnPlaneIntent(STEERED_NET, "B.Cu");
+    double routedPlaneLayerLengthMm = traceLengthMm(routed, STEERED_NET, "B.Cu");
+
+    float genericScore = new BoardStatistics(routed.board).getNormalizedScore(routed.routerSettings.scoring);
+    float returnPathPenalty = RouterIntentBoardScorer.returnPathPlaneLayerPenalty(routed.board, returnPlaneIntent);
+    float intentScore = RouterIntentBoardScorer.normalizedScore(
+        routed.board,
+        routed.routerSettings.scoring,
+        returnPlaneIntent);
+
+    assertTrue(routedPlaneLayerLengthMm > 0, "fixture should route measurable signal copper on B.Cu");
+    assertEquals(routedPlaneLayerLengthMm * 4f * 8f, returnPathPenalty, 0.001f);
+    assertEquals(Math.max(0f, genericScore - returnPathPenalty), intentScore, 0.001f);
+  }
+
   private RoutingJob routedRipupFixture() {
     TestingSettings settings = new TestingSettings();
     settings.setMaxPasses(20);
@@ -202,6 +221,32 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
     return intent;
   }
 
+  private RouterIntentSettings preferredLayerIntent(String netName, String layerName) {
+    RouterIntentSettings.NetIntent netIntent = new RouterIntentSettings.NetIntent();
+    netIntent.net = netName;
+    netIntent.priority = RouterIntentSettings.Priority.CRITICAL;
+    netIntent.scope = RouterIntentSettings.Scope.GLOBAL;
+    netIntent.ripupProtection = RouterIntentSettings.RipupProtection.NONE;
+    netIntent.preferredLayers = new String[] { layerName };
+
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.netIntents = new RouterIntentSettings.NetIntent[] { netIntent };
+    return intent;
+  }
+
+  private RouterIntentSettings returnPlaneIntent(String netName, String layerName) {
+    RouterIntentSettings.NetIntent netIntent = new RouterIntentSettings.NetIntent();
+    netIntent.net = netName;
+    netIntent.priority = RouterIntentSettings.Priority.CRITICAL;
+    netIntent.scope = RouterIntentSettings.Scope.GLOBAL;
+    netIntent.ripupProtection = RouterIntentSettings.RipupProtection.NONE;
+    netIntent.planeLayers = new String[] { layerName };
+
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.netIntents = new RouterIntentSettings.NetIntent[] { netIntent };
+    return intent;
+  }
+
   private RouterIntentSettings criticalPathIntent(String netName, double maxLengthMm) {
     RouterIntentSettings.CriticalPathIntent criticalPath = new RouterIntentSettings.CriticalPathIntent();
     criticalPath.id = "critical_path_length_test";
@@ -267,5 +312,26 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
   private double traceLengthMm(RoutingJob job, String netName) {
     Net net = job.board.rules.nets.get(netName, 1);
     return net.get_trace_length() / job.board.communication.get_resolution(Unit.MM);
+  }
+
+  private double traceLengthMm(RoutingJob job, String netName, String layerName) {
+    Net net = job.board.rules.nets.get(netName, 1);
+    int layer = layerIndex(job, layerName);
+    double result = 0.0;
+    for (Trace trace : job.board.get_traces()) {
+      if (trace.contains_net(net.net_number) && trace.get_layer() == layer) {
+        result += trace.get_length();
+      }
+    }
+    return result / job.board.communication.get_resolution(Unit.MM);
+  }
+
+  private int layerIndex(RoutingJob job, String layerName) {
+    for (int i = 0; i < job.board.layer_structure.arr.length; i++) {
+      if (layerName.equals(job.board.layer_structure.arr[i].name)) {
+        return i;
+      }
+    }
+    throw new IllegalArgumentException("unknown layer: " + layerName);
   }
 }
