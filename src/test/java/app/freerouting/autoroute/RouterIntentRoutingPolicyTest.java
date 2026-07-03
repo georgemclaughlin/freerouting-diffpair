@@ -56,6 +56,68 @@ class RouterIntentRoutingPolicyTest {
     assertEquals(12.0, penalized.vertical);
   }
 
+  @Test
+  void viaCostFactorUsesClosedRipupProtectionRanks() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "NORMAL_NET",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.NORMAL,
+            RouterIntentSettings.RipupProtection.NONE),
+        netIntent(
+            "CRITICAL_NET",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL),
+        netIntent(
+            "LOCAL_SUPPORT_NET",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.LOCAL,
+            RouterIntentSettings.RipupProtection.LOCAL_SUPPORT),
+        netIntent(
+            "SOURCE_COPPER_NET",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.LOCAL,
+            RouterIntentSettings.RipupProtection.SOURCE_COPPER));
+
+    assertEquals(1.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "NORMAL_NET"));
+    assertEquals(1.5, RouterIntentRoutingPolicy.viaCostFactor(intent, "CRITICAL_NET"));
+    assertEquals(2.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "LOCAL_SUPPORT_NET"));
+    assertEquals(3.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "SOURCE_COPPER_NET"));
+    assertEquals(1.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "UNKNOWN_NET"));
+  }
+
+  @Test
+  void ripupCostFactorProtectsHigherRankedCopperMoreStrongly() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "NORMAL_NET",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.NORMAL,
+            RouterIntentSettings.RipupProtection.NONE),
+        netIntent(
+            "CRITICAL_NET",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL),
+        netIntent(
+            "LOCAL_SUPPORT_NET",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.LOCAL,
+            RouterIntentSettings.RipupProtection.LOCAL_SUPPORT),
+        netIntent(
+            "SOURCE_COPPER_NET",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.LOCAL,
+            RouterIntentSettings.RipupProtection.SOURCE_COPPER));
+
+    assertEquals(1.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "NORMAL_NET"));
+    assertEquals(2.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "CRITICAL_NET"));
+    assertEquals(4.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "LOCAL_SUPPORT_NET"));
+    assertEquals(8.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "SOURCE_COPPER_NET"));
+    assertEquals(1.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "UNKNOWN_NET"));
+  }
+
   private RouterIntentSettings intentWith(RouterIntentSettings.NetIntent... netIntents) {
     RouterIntentSettings intent = new RouterIntentSettings();
     intent.netIntents = netIntents;

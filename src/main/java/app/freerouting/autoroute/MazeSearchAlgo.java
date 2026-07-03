@@ -25,6 +25,7 @@ import app.freerouting.geometry.planar.Point;
 import app.freerouting.geometry.planar.Polyline;
 import app.freerouting.geometry.planar.TileShape;
 import app.freerouting.logger.FRLogger;
+import app.freerouting.rules.Net;
 import app.freerouting.rules.ViaInfo;
 import java.util.Collection;
 import java.util.Iterator;
@@ -1415,7 +1416,8 @@ public class MazeSearchAlgo {
       }
     }
 
-     double ripup_cost = this.ctrl.ripup_costs * cost_factor;
+     double intent_ripup_cost_factor = routerIntentRipupCostFactor(p_obstacle_item);
+     double ripup_cost = this.ctrl.ripup_costs * cost_factor * intent_ripup_cost_factor;
      double detour = 1;
      double trace_length = 0;
      double min_trace_length = 0;
@@ -1467,11 +1469,27 @@ public class MazeSearchAlgo {
         + ", connection_items=" + connectionItemIds
         + ", half_width=" + cost_factor
         + ", ripup_costs=" + this.ctrl.ripup_costs
+        + ", intent_ripup_cost_factor=" + intent_ripup_cost_factor
         + ", trace_length=" + trace_length
         + ", min_trace_length=" + min_trace_length
         + ", item_count=" + item_count
         + ", detour=" + detour
         + ", result=" + result);
+    return result;
+  }
+
+  private double routerIntentRipupCostFactor(Item p_obstacle_item) {
+    if (this.ctrl.settings.intent == null || p_obstacle_item == null) {
+      return 1.0;
+    }
+
+    double result = 1.0;
+    for (int i = 0; i < p_obstacle_item.net_count(); i++) {
+      Net net = this.autoroute_engine.board.rules.nets.get(p_obstacle_item.get_net_no(i));
+      if (net != null) {
+        result = Math.max(result, RouterIntentRoutingPolicy.ripupCostFactor(this.ctrl.settings.intent, net.name));
+      }
+    }
     return result;
   }
 

@@ -4,6 +4,12 @@ import app.freerouting.settings.RouterIntentSettings;
 
 final class RouterIntentRoutingPolicy {
   private static final double NON_PREFERRED_LAYER_COST_FACTOR = 4.0;
+  private static final double CRITICAL_NET_VIA_COST_FACTOR = 1.5;
+  private static final double LOCAL_SUPPORT_VIA_COST_FACTOR = 2.0;
+  private static final double SOURCE_COPPER_VIA_COST_FACTOR = 3.0;
+  private static final double CRITICAL_NET_RIPUP_COST_FACTOR = 2.0;
+  private static final double LOCAL_SUPPORT_RIPUP_COST_FACTOR = 4.0;
+  private static final double SOURCE_COPPER_RIPUP_COST_FACTOR = 8.0;
 
   private RouterIntentRoutingPolicy() {
   }
@@ -34,6 +40,24 @@ final class RouterIntentRoutingPolicy {
     return new AutorouteControl.ExpansionCostFactor(
         base.horizontal * NON_PREFERRED_LAYER_COST_FACTOR,
         base.vertical * NON_PREFERRED_LAYER_COST_FACTOR);
+  }
+
+  static double viaCostFactor(RouterIntentSettings intent, String netName) {
+    return switch (ripupProtectionRank(intent, netName)) {
+      case 1 -> CRITICAL_NET_VIA_COST_FACTOR;
+      case 2 -> LOCAL_SUPPORT_VIA_COST_FACTOR;
+      case 3 -> SOURCE_COPPER_VIA_COST_FACTOR;
+      default -> 1.0;
+    };
+  }
+
+  static double ripupCostFactor(RouterIntentSettings intent, String netName) {
+    return switch (ripupProtectionRank(intent, netName)) {
+      case 1 -> CRITICAL_NET_RIPUP_COST_FACTOR;
+      case 2 -> LOCAL_SUPPORT_RIPUP_COST_FACTOR;
+      case 3 -> SOURCE_COPPER_RIPUP_COST_FACTOR;
+      default -> 1.0;
+    };
   }
 
   private static int priorityRank(RouterIntentSettings intent, String netName) {

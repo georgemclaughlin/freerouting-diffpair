@@ -261,6 +261,9 @@ public class AutorouteControl {
       via_cost_factor *= 0.1;
     }
     min_normal_via_cost = p_via_costs * via_cost_factor;
+    min_normal_via_cost *= RouterIntentRoutingPolicy.viaCostFactor(
+        this.settings.intent,
+        curr_net == null ? null : curr_net.name);
     min_cheap_via_cost = 0.8 * min_normal_via_cost;
   }
 
