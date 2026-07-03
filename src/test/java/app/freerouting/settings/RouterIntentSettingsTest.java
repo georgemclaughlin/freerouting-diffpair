@@ -63,6 +63,8 @@ class RouterIntentSettingsTest {
     assertEquals(0, intent.differentialPairMemberRankForNet("USB_D_PLUS"));
     assertEquals(1, intent.differentialPairMemberRankForNet("USB_D_MINUS"));
     assertEquals(2, intent.differentialPairMemberRankForNet("VBUS"));
+    assertEquals("USB_D_MINUS", intent.differentialPairSiblingNetForNet("USB_D_PLUS"));
+    assertEquals("USB_D_PLUS", intent.differentialPairSiblingNetForNet("USB_D_MINUS"));
     assertTrue(intent.areDifferentialPairMembers("USB_D_PLUS", "USB_D_MINUS"));
     assertFalse(intent.areDifferentialPairMembers("USB_D_PLUS", "VBUS"));
   }

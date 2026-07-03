@@ -90,6 +90,38 @@ class RouterIntentRoutingPolicyTest {
   }
 
   @Test
+  void traceCostForDifferentialPairSiblingLayerPenalizesLayersUnusedBySibling() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "USB_D_PLUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL),
+        netIntent(
+            "USB_D_MINUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL));
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] {
+        differentialPair("usb2_data", "USB_D_PLUS", "USB_D_MINUS")
+    };
+    AutorouteControl.ExpansionCostFactor base = new AutorouteControl.ExpansionCostFactor(2.0, 3.0);
+
+    assertSame(
+        base,
+        RouterIntentRoutingPolicy.traceCostForDifferentialPairSiblingLayer(intent, "USB_D_MINUS", true, base));
+
+    AutorouteControl.ExpansionCostFactor penalized =
+        RouterIntentRoutingPolicy.traceCostForDifferentialPairSiblingLayer(intent, "USB_D_MINUS", false, base);
+    assertEquals(6.0, penalized.horizontal);
+    assertEquals(9.0, penalized.vertical);
+
+    assertSame(
+        base,
+        RouterIntentRoutingPolicy.traceCostForDifferentialPairSiblingLayer(intent, "VBUS", false, base));
+  }
+
+  @Test
   void viaCostFactorUsesClosedRipupProtectionRanks() {
     RouterIntentSettings intent = intentWith(
         netIntent(

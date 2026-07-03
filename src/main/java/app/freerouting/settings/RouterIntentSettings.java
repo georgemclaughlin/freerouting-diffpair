@@ -329,6 +329,20 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return 2;
   }
 
+  public String differentialPairSiblingNetForNet(String netName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    if (pair == null) {
+      return null;
+    }
+    if (netName.equals(pair.positiveNet)) {
+      return pair.negativeNet;
+    }
+    if (netName.equals(pair.negativeNet)) {
+      return pair.positiveNet;
+    }
+    return null;
+  }
+
   public boolean areDifferentialPairMembers(String leftNetName, String rightNetName) {
     String leftGroup = differentialPairGroupForNet(leftNetName);
     String rightGroup = differentialPairGroupForNet(rightNetName);

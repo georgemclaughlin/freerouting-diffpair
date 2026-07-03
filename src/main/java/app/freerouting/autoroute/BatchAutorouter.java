@@ -1651,22 +1651,66 @@ public class BatchAutorouter extends NamedAlgorithm {
     return null;
   }
 
-  private AutorouteControl.ExpansionCostFactor[] traceCostsForRouterIntent(int routeNetNo) {
+  AutorouteControl.ExpansionCostFactor[] traceCostsForRouterIntent(int routeNetNo) {
     RouterIntentSettings intent = this.settings.intent;
     String routeNetName = netName(routeNetNo);
-    if (intent == null || !intent.hasPreferredLayerIntent(routeNetName)) {
+    boolean[] differentialPairSiblingLayers = routedDifferentialPairSiblingLayers(intent, routeNetName);
+    if (intent == null
+        || (!intent.hasPreferredLayerIntent(routeNetName) && !hasAnyLayer(differentialPairSiblingLayers))) {
       return this.trace_cost_arr;
     }
 
     AutorouteControl.ExpansionCostFactor[] result = new AutorouteControl.ExpansionCostFactor[this.trace_cost_arr.length];
     for (int layer = 0; layer < this.trace_cost_arr.length; layer++) {
-      result[layer] = RouterIntentRoutingPolicy.traceCostForLayer(
+      AutorouteControl.ExpansionCostFactor layerCost = RouterIntentRoutingPolicy.traceCostForLayer(
           intent,
           routeNetName,
           boardLayerName(layer),
           this.trace_cost_arr[layer]);
+      result[layer] = RouterIntentRoutingPolicy.traceCostForDifferentialPairSiblingLayer(
+          intent,
+          routeNetName,
+          layer < differentialPairSiblingLayers.length && differentialPairSiblingLayers[layer],
+          layerCost);
     }
     return result;
+  }
+
+  private boolean[] routedDifferentialPairSiblingLayers(RouterIntentSettings intent, String routeNetName) {
+    boolean[] result = new boolean[this.trace_cost_arr.length];
+    if (intent == null || routeNetName == null || this.board == null || this.board.rules == null) {
+      return result;
+    }
+
+    String siblingNetName = intent.differentialPairSiblingNetForNet(routeNetName);
+    if (siblingNetName == null) {
+      return result;
+    }
+
+    Net siblingNet = this.board.rules.nets.get(siblingNetName, 1);
+    if (siblingNet == null) {
+      return result;
+    }
+
+    for (Trace trace : this.board.get_traces()) {
+      if (!trace.contains_net(siblingNet.net_number)) {
+        continue;
+      }
+      int layer = trace.get_layer();
+      if (layer >= 0 && layer < result.length) {
+        result[layer] = true;
+      }
+    }
+    return result;
+  }
+
+  private static boolean hasAnyLayer(boolean[] layers) {
+    for (boolean layer : layers) {
+      if (layer) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private String boardLayerName(int layer) {
