@@ -271,6 +271,10 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return this.netIntents != null && this.netIntents.length > 0;
   }
 
+  public boolean hasDifferentialPairIntents() {
+    return this.differentialPairs != null && this.differentialPairs.length > 0;
+  }
+
   public int priorityRankForNet(String netName) {
     NetIntent intent = netIntent(netName);
     return intent == null ? 0 : intent.priorityRank();
@@ -293,6 +297,42 @@ public class RouterIntentSettings implements Serializable, Cloneable {
 
   public boolean hasLocalConfinementIntent(String netName) {
     return hasLocalScopeIntent(netName) || hasBlockPortIntent(netName);
+  }
+
+  public String differentialPairGroupForNet(String netName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    if (pair != null) {
+      if (pair.id != null && !pair.id.isEmpty()) {
+        return pair.id;
+      }
+      return pair.positiveNet + ":" + pair.negativeNet;
+    }
+
+    NetIntent intent = netIntent(netName);
+    if (intent != null && intent.differentialPairIds != null && intent.differentialPairIds.length > 0) {
+      return intent.differentialPairIds[0];
+    }
+    return null;
+  }
+
+  public int differentialPairMemberRankForNet(String netName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    if (pair == null) {
+      return 2;
+    }
+    if (netName.equals(pair.positiveNet)) {
+      return 0;
+    }
+    if (netName.equals(pair.negativeNet)) {
+      return 1;
+    }
+    return 2;
+  }
+
+  public boolean areDifferentialPairMembers(String leftNetName, String rightNetName) {
+    String leftGroup = differentialPairGroupForNet(leftNetName);
+    String rightGroup = differentialPairGroupForNet(rightNetName);
+    return leftGroup != null && leftGroup.equals(rightGroup);
   }
 
   public LocalSupportIntent[] localSupportForNet(String netName) {
@@ -361,6 +401,21 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       }
     }
     return false;
+  }
+
+  private DifferentialPairIntent differentialPairForNet(String netName) {
+    if (netName == null || this.differentialPairs == null || this.differentialPairs.length == 0) {
+      return null;
+    }
+    for (DifferentialPairIntent pair : this.differentialPairs) {
+      if (pair == null) {
+        continue;
+      }
+      if (netName.equals(pair.positiveNet) || netName.equals(pair.negativeNet)) {
+        return pair;
+      }
+    }
+    return null;
   }
 
   private NetIntent netIntent(String netName) {

@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import app.freerouting.settings.RouterIntentSettings;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class RouterIntentRoutingPolicyTest {
@@ -35,6 +37,37 @@ class RouterIntentRoutingPolicyTest {
     assertTrue(RouterIntentRoutingPolicy.compareNetNames(intent, "LOCAL_BOOT", "ORDINARY") < 0);
     assertTrue(RouterIntentRoutingPolicy.compareNetNames(intent, "CRITICAL_3V3", "ORDINARY") < 0);
     assertEquals(0, RouterIntentRoutingPolicy.compareNetNames(intent, "UNKNOWN_A", "UNKNOWN_B"));
+  }
+
+  @Test
+  void compareNetNamesKeepsDifferentialPairMembersAdjacent() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "VBUS_SENSE",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL,
+            "F.Cu"),
+        netIntent(
+            "USB_D_MINUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL,
+            "F.Cu"),
+        netIntent(
+            "USB_D_PLUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL,
+            "F.Cu"));
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] {
+        differentialPair("usb2_data", "USB_D_PLUS", "USB_D_MINUS")
+    };
+
+    List<String> nets = new ArrayList<>(List.of("VBUS_SENSE", "USB_D_MINUS", "USB_D_PLUS"));
+    nets.sort((left, right) -> RouterIntentRoutingPolicy.compareNetNames(intent, left, right));
+
+    assertEquals(List.of("USB_D_PLUS", "USB_D_MINUS", "VBUS_SENSE"), nets);
   }
 
   @Test
@@ -155,6 +188,18 @@ class RouterIntentRoutingPolicyTest {
     intent.scope = scope;
     intent.ripupProtection = ripupProtection;
     intent.preferredLayers = preferredLayers;
+    return intent;
+  }
+
+  private RouterIntentSettings.DifferentialPairIntent differentialPair(
+      String id,
+      String positiveNet,
+      String negativeNet) {
+    RouterIntentSettings.DifferentialPairIntent intent = new RouterIntentSettings.DifferentialPairIntent();
+    intent.id = id;
+    intent.positiveNet = positiveNet;
+    intent.negativeNet = negativeNet;
+    intent.priority = RouterIntentSettings.Priority.CRITICAL;
     return intent;
   }
 }

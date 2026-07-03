@@ -48,6 +48,26 @@ class RouterIntentSettingsTest {
   }
 
   @Test
+  void differentialPairAccessorsExposeClosedPairMembership() {
+    RouterIntentSettings intent = new RouterIntentSettings();
+    RouterIntentSettings.DifferentialPairIntent pair = new RouterIntentSettings.DifferentialPairIntent();
+    pair.id = "usb2_data";
+    pair.positiveNet = "USB_D_PLUS";
+    pair.negativeNet = "USB_D_MINUS";
+    pair.priority = RouterIntentSettings.Priority.CRITICAL;
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
+
+    assertTrue(intent.hasDifferentialPairIntents());
+    assertEquals("usb2_data", intent.differentialPairGroupForNet("USB_D_PLUS"));
+    assertEquals("usb2_data", intent.differentialPairGroupForNet("USB_D_MINUS"));
+    assertEquals(0, intent.differentialPairMemberRankForNet("USB_D_PLUS"));
+    assertEquals(1, intent.differentialPairMemberRankForNet("USB_D_MINUS"));
+    assertEquals(2, intent.differentialPairMemberRankForNet("VBUS"));
+    assertTrue(intent.areDifferentialPairMembers("USB_D_PLUS", "USB_D_MINUS"));
+    assertFalse(intent.areDifferentialPairMembers("USB_D_PLUS", "VBUS"));
+  }
+
+  @Test
   void localSupportForNetReturnsOnlyMatchingClosedEntries() throws IOException {
     RouterIntentSettings intent = RouterIntentSettings.load(writePayload("router-intent.json", validPayload()));
 

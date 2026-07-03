@@ -26,6 +26,11 @@ final class RouterIntentRoutingPolicy {
       return scopeCompare;
     }
 
+    int differentialPairCompare = compareDifferentialPairMembership(intent, leftNetName, rightNetName);
+    if (differentialPairCompare != 0) {
+      return differentialPairCompare;
+    }
+
     return Integer.compare(ripupProtectionRank(intent, rightNetName), ripupProtectionRank(intent, leftNetName));
   }
 
@@ -75,5 +80,34 @@ final class RouterIntentRoutingPolicy {
 
   private static int ripupProtectionRank(RouterIntentSettings intent, String netName) {
     return intent == null ? 0 : intent.ripupProtectionRankForNet(netName);
+  }
+
+  private static int compareDifferentialPairMembership(
+      RouterIntentSettings intent,
+      String leftNetName,
+      String rightNetName) {
+    if (intent == null) {
+      return 0;
+    }
+
+    String leftGroup = intent.differentialPairGroupForNet(leftNetName);
+    String rightGroup = intent.differentialPairGroupForNet(rightNetName);
+    if (leftGroup == null && rightGroup == null) {
+      return 0;
+    }
+    if (leftGroup == null) {
+      return 1;
+    }
+    if (rightGroup == null) {
+      return -1;
+    }
+
+    int groupCompare = leftGroup.compareTo(rightGroup);
+    if (groupCompare != 0) {
+      return groupCompare;
+    }
+    return Integer.compare(
+        intent.differentialPairMemberRankForNet(leftNetName),
+        intent.differentialPairMemberRankForNet(rightNetName));
   }
 }

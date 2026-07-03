@@ -303,7 +303,9 @@ public class BatchAutorouter extends NamedAlgorithm {
 
   private void applyRouterIntentOrder(List<Item> autorouteItems) {
     RouterIntentSettings intent = this.settings.intent;
-    if (intent == null || !intent.hasNetIntents() || autorouteItems.size() < 2) {
+    if (intent == null
+        || (!intent.hasNetIntents() && !intent.hasDifferentialPairIntents())
+        || autorouteItems.size() < 2) {
       return;
     }
     autorouteItems.sort(this::compareRouterIntentItems);
