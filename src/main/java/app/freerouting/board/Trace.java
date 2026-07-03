@@ -5,6 +5,7 @@ import app.freerouting.boardgraphics.GraphicsContext;
 import app.freerouting.geometry.planar.FloatPoint;
 import app.freerouting.geometry.planar.IntOctagon;
 import app.freerouting.geometry.planar.Point;
+import app.freerouting.geometry.planar.Shape;
 import app.freerouting.geometry.planar.TileShape;
 import app.freerouting.logger.FRLogger;
 import app.freerouting.util.TextManager;
@@ -173,7 +174,7 @@ public abstract class Trace extends Item implements Connectable, Serializable {
     if (p_point == null || !(p_point.equals(this.first_corner()) || p_point.equals(this.last_corner()))) {
       return new TreeSet<>();
     }
-    TileShape search_shape = TileShape.get_instance(p_point);
+    TileShape search_shape = p_point.surrounding_octagon().enlarge(this.half_width);
     Set<SearchTreeObject> overlaps = board.overlapping_objects(search_shape, this.layer);
     Set<Item> result = new TreeSet<>();
     for (SearchTreeObject curr_ob : overlaps) {
@@ -184,6 +185,11 @@ public abstract class Trace extends Item implements Connectable, Serializable {
         if (curr_item instanceof Trace curr_trace) {
           if (p_point.equals(curr_trace.first_corner()) ||
               p_point.equals(curr_trace.last_corner())) {
+            result.add(curr_item);
+          }
+        } else if (curr_item instanceof Pin curr_pin) {
+          Shape pin_shape = curr_pin.get_shape_on_layer(this.layer);
+          if (pin_shape != null && pin_shape.contains(p_point)) {
             result.add(curr_item);
           }
         } else if (curr_item instanceof DrillItem curr_drill_item) {

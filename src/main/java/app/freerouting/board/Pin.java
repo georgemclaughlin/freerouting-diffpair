@@ -352,6 +352,11 @@ public class Pin extends DrillItem implements Serializable {
     if (!p_other.shares_net(this)) {
       return true;
     }
+    if (p_other instanceof Pin otherPin
+        && this.get_component_no() > 0
+        && this.get_component_no() == otherPin.get_component_no()) {
+      return false;
+    }
     if (p_other instanceof Trace) {
       return false;
     }

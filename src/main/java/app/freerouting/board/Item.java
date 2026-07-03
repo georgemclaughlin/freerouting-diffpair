@@ -37,6 +37,7 @@ import java.util.TreeSet;
 public abstract class Item implements Drawable, SearchTreeObject, ObjectInfoPanel.Printable, UndoableObjects.Storable, Serializable {
 
   private static final double PROTECT_FANOUT_LENGTH = 400;
+  private static final double SAME_COMPONENT_PIN_CLEARANCE_EPSILON = 10.0;
   private final int id_no;
   /**
    * The board this Item is on
@@ -419,6 +420,9 @@ public abstract class Item implements Drawable, SearchTreeObject, ObjectInfoPane
             enlarged_shape_2 = (TileShape) shape_2.enlarge(cl_offset);
 
             actual_clearance = calculate_clearance_between_two_shapes(shape_1, shape_2, minimum_clearance + ClearanceMatrix.clearance_safety_margin);
+            if (is_same_component_pin_clearance_noise(curr_item, minimum_clearance, actual_clearance)) {
+              continue;
+            }
             if ((smallest_clearance == 0) || (actual_clearance < smallest_clearance)) {
               smallest_clearance = actual_clearance;
             }
@@ -433,6 +437,14 @@ public abstract class Item implements Drawable, SearchTreeObject, ObjectInfoPane
       }
     }
     return result;
+  }
+
+  private boolean is_same_component_pin_clearance_noise(Item p_other, double p_minimum_clearance, double p_actual_clearance) {
+    return this instanceof Pin
+        && p_other instanceof Pin
+        && this.component_no > 0
+        && this.component_no == p_other.component_no
+        && p_actual_clearance + SAME_COMPONENT_PIN_CLEARANCE_EPSILON >= p_minimum_clearance;
   }
 
   private double calculate_clearance_between_two_shapes(TileShape shape_1, TileShape shape_2, double minimum_clearance) {

@@ -265,8 +265,16 @@ public abstract class DrillItem extends Item implements Connectable, Serializabl
   @Override
   public Set<Item> get_normal_contacts() {
     Point drill_center = this.get_center();
+    int search_layer = -1;
     TileShape search_shape = TileShape.get_instance(drill_center);
-    Set<SearchTreeObject> overlaps = board.overlapping_objects(search_shape, -1);
+    if (this instanceof Pin && this.first_layer() == this.last_layer()) {
+      Shape pin_shape = get_shape_on_layer(this.first_layer());
+      if (pin_shape instanceof TileShape tile_shape) {
+        search_shape = tile_shape;
+        search_layer = this.first_layer();
+      }
+    }
+    Set<SearchTreeObject> overlaps = board.overlapping_objects(search_shape, search_layer);
     Set<Item> result = new TreeSet<>();
     for (SearchTreeObject curr_ob : overlaps) {
       if (!(curr_ob instanceof Item curr_item)) {
@@ -278,7 +286,8 @@ public abstract class DrillItem extends Item implements Connectable, Serializabl
           // Tolerance-based matching causes false cycle detection during trace normalization
           // when nearby trace endpoints (but not at pin center) are incorrectly treated as contacts.
           if (drill_center.equals(curr_trace.first_corner()) ||
-              drill_center.equals(curr_trace.last_corner())) {
+              drill_center.equals(curr_trace.last_corner()) ||
+              trace_endpoint_lies_inside_pin_shape(curr_trace)) {
             result.add(curr_item);
           }
         } else if (curr_item instanceof DrillItem curr_drill_item) {
@@ -293,6 +302,15 @@ public abstract class DrillItem extends Item implements Connectable, Serializabl
       }
     }
     return result;
+  }
+
+  private boolean trace_endpoint_lies_inside_pin_shape(Trace p_trace) {
+    if (!(this instanceof Pin) || p_trace == null) {
+      return false;
+    }
+    Shape pin_shape = get_shape_on_layer(p_trace.get_layer());
+    return pin_shape != null
+        && (pin_shape.contains(p_trace.first_corner()) || pin_shape.contains(p_trace.last_corner()));
   }
 
   /**
@@ -335,6 +353,13 @@ public abstract class DrillItem extends Item implements Connectable, Serializabl
     Point drill_center = this.get_center();
     if (drill_center.equals(p_trace.first_corner()) || drill_center.equals(p_trace.last_corner())) {
       return drill_center;
+    }
+    if (trace_endpoint_lies_inside_pin_shape(p_trace)) {
+      Shape pin_shape = get_shape_on_layer(p_trace.get_layer());
+      if (pin_shape != null && pin_shape.contains(p_trace.first_corner())) {
+        return p_trace.first_corner();
+      }
+      return p_trace.last_corner();
     }
     return null;
   }
