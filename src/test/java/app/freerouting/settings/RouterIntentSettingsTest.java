@@ -37,10 +37,24 @@ class RouterIntentSettingsTest {
     assertEquals(3, intent.priorityRankForNet("3V3"));
     assertEquals(2, intent.scopeRankForNet("ESP_BOOT_LOCAL"));
     assertEquals(2, intent.ripupProtectionRankForNet("ESP_BOOT_LOCAL"));
+    assertTrue(intent.hasLocalScopeIntent("ESP_BOOT_LOCAL"));
+    assertFalse(intent.hasLocalScopeIntent("3V3"));
     assertTrue(intent.hasPreferredLayerIntent("3V3"));
     assertTrue(intent.isPreferredLayerForNet("3V3", "F.Cu"));
     assertFalse(intent.isPreferredLayerForNet("3V3", "B.Cu"));
     assertEquals(0, intent.priorityRankForNet("UNMENTIONED"));
+  }
+
+  @Test
+  void localSupportForNetReturnsOnlyMatchingClosedEntries() throws IOException {
+    RouterIntentSettings intent = RouterIntentSettings.load(writePayload("router-intent.json", validPayload()));
+
+    RouterIntentSettings.LocalSupportIntent[] bootSupport = intent.localSupportForNet("ESP_BOOT_LOCAL");
+    RouterIntentSettings.LocalSupportIntent[] powerSupport = intent.localSupportForNet("3V3");
+
+    assertEquals(1, bootSupport.length);
+    assertEquals("local_support_1_same_net_pad_tie", bootSupport[0].id);
+    assertEquals(0, powerSupport.length);
   }
 
   @Test

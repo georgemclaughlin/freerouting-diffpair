@@ -10,7 +10,9 @@ import java.io.Reader;
 import java.io.Serializable;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -259,6 +261,25 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return intent == null ? 0 : intent.ripupProtectionRank();
   }
 
+  public boolean hasLocalScopeIntent(String netName) {
+    NetIntent intent = netIntent(netName);
+    return intent != null && intent.scope == Scope.LOCAL;
+  }
+
+  public LocalSupportIntent[] localSupportForNet(String netName) {
+    if (netName == null || this.localSupport == null || this.localSupport.length == 0) {
+      return new LocalSupportIntent[0];
+    }
+
+    List<LocalSupportIntent> result = new ArrayList<>();
+    for (LocalSupportIntent support : this.localSupport) {
+      if (support != null && contains(support.nets, netName)) {
+        result.add(support);
+      }
+    }
+    return result.toArray(new LocalSupportIntent[0]);
+  }
+
   public boolean hasPreferredLayerIntent(String netName) {
     NetIntent intent = netIntent(netName);
     return intent != null && intent.preferredLayers != null && intent.preferredLayers.length > 0;
@@ -297,6 +318,18 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       }
     }
     this.netIntentByName = index;
+  }
+
+  private static boolean contains(String[] values, String expected) {
+    if (values == null) {
+      return false;
+    }
+    for (String value : values) {
+      if (expected.equals(value)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @Override

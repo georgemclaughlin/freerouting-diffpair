@@ -118,6 +118,25 @@ class RouterIntentRoutingPolicyTest {
     assertEquals(1.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "UNKNOWN_NET"));
   }
 
+  @Test
+  void localScopeExitCostFactorOnlyAppliesToLocalNets() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "NORMAL_NET",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.NORMAL,
+            RouterIntentSettings.RipupProtection.NONE),
+        netIntent(
+            "LOCAL_SUPPORT_NET",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.LOCAL,
+            RouterIntentSettings.RipupProtection.LOCAL_SUPPORT));
+
+    assertEquals(0.0, RouterIntentRoutingPolicy.localScopeExitCostFactor(intent, "NORMAL_NET"));
+    assertTrue(RouterIntentRoutingPolicy.localScopeExitCostFactor(intent, "LOCAL_SUPPORT_NET") > 1.0);
+    assertEquals(0.0, RouterIntentRoutingPolicy.localScopeExitCostFactor(intent, "UNKNOWN_NET"));
+  }
+
   private RouterIntentSettings intentWith(RouterIntentSettings.NetIntent... netIntents) {
     RouterIntentSettings intent = new RouterIntentSettings();
     intent.netIntents = netIntents;

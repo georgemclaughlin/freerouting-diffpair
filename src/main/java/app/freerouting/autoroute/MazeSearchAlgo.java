@@ -733,7 +733,8 @@ public class MazeSearchAlgo {
       }
     }
 
-    double expansion_value = p_from_element.expansion_value + p_add_costs + bend_cost_penalty
+    double local_scope_penalty = ctrl.routerIntentLocalScopePenalty(shape_entry_middle, layer);
+    double expansion_value = p_from_element.expansion_value + p_add_costs + bend_cost_penalty + local_scope_penalty
         + shape_entry_middle.weighted_distance(p_from_element.shape_entry.a.middle_point(p_from_element.shape_entry.b),
             ctrl.trace_costs[layer].horizontal,
             ctrl.trace_costs[layer].vertical);
@@ -764,6 +765,7 @@ public class MazeSearchAlgo {
         + ", add_costs=" + p_add_costs
         + ", adjustment=" + p_adjustment
         + ", room_ripped=" + room_ripped
+        + ", local_scope_penalty=" + local_scope_penalty
         + ", expansion_value=" + expansion_value
         + ", sorting_value=" + sorting_value
         + ", door=" + describe_expandable(p_door)
@@ -778,6 +780,7 @@ public class MazeSearchAlgo {
             + ", add_costs=" + p_add_costs
             + ", adjustment=" + p_adjustment
             + ", room_ripped=" + room_ripped
+            + ", local_scope_penalty=" + local_scope_penalty
             + ", expansion_value=" + expansion_value
             + ", sorting_value=" + sorting_value,
         "Net #" + ctrl.net_no

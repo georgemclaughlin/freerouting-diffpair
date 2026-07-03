@@ -10,6 +10,7 @@ final class RouterIntentRoutingPolicy {
   private static final double CRITICAL_NET_RIPUP_COST_FACTOR = 2.0;
   private static final double LOCAL_SUPPORT_RIPUP_COST_FACTOR = 4.0;
   private static final double SOURCE_COPPER_RIPUP_COST_FACTOR = 8.0;
+  private static final double LOCAL_SCOPE_EXIT_COST_FACTOR = 6.0;
 
   private RouterIntentRoutingPolicy() {
   }
@@ -58,6 +59,10 @@ final class RouterIntentRoutingPolicy {
       case 3 -> SOURCE_COPPER_RIPUP_COST_FACTOR;
       default -> 1.0;
     };
+  }
+
+  static double localScopeExitCostFactor(RouterIntentSettings intent, String netName) {
+    return intent != null && intent.hasLocalScopeIntent(netName) ? LOCAL_SCOPE_EXIT_COST_FACTOR : 0.0;
   }
 
   private static int priorityRank(RouterIntentSettings intent, String netName) {
