@@ -55,6 +55,7 @@ class RouterIntentSettingsTest {
     pair.positiveNet = "USB_D_PLUS";
     pair.negativeNet = "USB_D_MINUS";
     pair.priority = RouterIntentSettings.Priority.CRITICAL;
+    pair.maxSkewMm = 0.75;
     intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
 
     assertTrue(intent.hasDifferentialPairIntents());
@@ -65,6 +66,8 @@ class RouterIntentSettingsTest {
     assertEquals(2, intent.differentialPairMemberRankForNet("VBUS"));
     assertEquals("USB_D_MINUS", intent.differentialPairSiblingNetForNet("USB_D_PLUS"));
     assertEquals("USB_D_PLUS", intent.differentialPairSiblingNetForNet("USB_D_MINUS"));
+    assertEquals(0.75, intent.differentialPairMaxSkewMmForNet("USB_D_PLUS"));
+    assertEquals(0.75, intent.differentialPairMaxSkewMmForNet("USB_D_MINUS"));
     assertTrue(intent.areDifferentialPairMembers("USB_D_PLUS", "USB_D_MINUS"));
     assertFalse(intent.areDifferentialPairMembers("USB_D_PLUS", "VBUS"));
   }

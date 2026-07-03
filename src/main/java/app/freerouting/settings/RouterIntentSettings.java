@@ -343,6 +343,11 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return null;
   }
 
+  public Double differentialPairMaxSkewMmForNet(String netName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    return pair == null ? null : pair.maxSkewMm;
+  }
+
   public boolean areDifferentialPairMembers(String leftNetName, String rightNetName) {
     String leftGroup = differentialPairGroupForNet(leftNetName);
     String rightGroup = differentialPairGroupForNet(rightNetName);

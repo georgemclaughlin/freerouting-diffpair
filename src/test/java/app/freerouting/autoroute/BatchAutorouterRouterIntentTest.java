@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import app.freerouting.Freerouting;
 import app.freerouting.board.FixedState;
 import app.freerouting.board.RoutingBoard;
+import app.freerouting.board.Unit;
 import app.freerouting.geometry.planar.FloatPoint;
 import app.freerouting.geometry.planar.IntBox;
 import app.freerouting.geometry.planar.IntPoint;
@@ -191,6 +192,39 @@ class BatchAutorouterRouterIntentTest {
   }
 
   @Test
+  void differentialPairSkewLimitPenalizesOverlongCandidatePathsBeforeMazeSearch() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net positive = board.rules.nets.get(USB_D_PLUS, 1);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(positive);
+    assertNotNull(negative);
+    insertSiblingTrace(board, positive, 1);
+
+    RouterSettings settings = routerSettings(board);
+    BatchAutorouter router = new BatchAutorouter(
+        null,
+        board,
+        settings,
+        true,
+        false,
+        settings.get_start_ripup_costs(),
+        500);
+    AutorouteControl control = new AutorouteControl(
+        board,
+        negative.net_number,
+        settings,
+        settings.get_via_costs(),
+        router.traceCostsForRouterIntent(negative.net_number));
+
+    router.applyRouterIntentPairSkewLimit(control, settings.intent, USB_D_MINUS);
+
+    double mmResolution = board.communication.get_resolution(Unit.MM);
+    double siblingLength = positive.get_trace_length();
+    assertEquals(0.0, control.routerIntentPairSkewPenalty(siblingLength + 0.5 * mmResolution, 1));
+    assertTrue(control.routerIntentPairSkewPenalty(siblingLength + 2.0 * mmResolution, 1) > 0.0);
+  }
+
+  @Test
   void differentialPairIntentRaisesViaCostBeforeMazeSearch() throws Exception {
     RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
     Net negative = board.rules.nets.get(USB_D_MINUS, 1);
@@ -290,6 +324,7 @@ class BatchAutorouterRouterIntentTest {
     pair.positiveNet = USB_D_PLUS;
     pair.negativeNet = USB_D_MINUS;
     pair.priority = RouterIntentSettings.Priority.CRITICAL;
+    pair.maxSkewMm = 1.0;
 
     RouterIntentSettings intent = new RouterIntentSettings();
     intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };

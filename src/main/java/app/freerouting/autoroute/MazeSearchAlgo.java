@@ -455,6 +455,7 @@ public class MazeSearchAlgo {
                     p_list_element.backtrack_door,
                     p_list_element.section_no_of_backtrack_door,
                     p_list_element.expansion_value + ripup_costs,
+                    p_list_element.path_length,
                     p_list_element.sorting_value + ripup_costs,
                     p_list_element.next_room,
                     p_list_element.shape_entry,
@@ -714,16 +715,16 @@ public class MazeSearchAlgo {
     CompleteExpansionRoom next_room = p_door.other_room(p_from_element.next_room);
     int layer = p_from_element.next_room.get_layer();
     FloatPoint shape_entry_middle = p_shape_entry.a.middle_point(p_shape_entry.b);
+    FloatPoint from_shape_entry_middle = p_from_element.shape_entry.a.middle_point(p_from_element.shape_entry.b);
     
     double bend_cost_penalty = 0.0;
     if (ctrl.bendCosts[layer] > 0.0 && p_from_element.backtrack_door != null) {
-      FloatPoint from_mid = p_from_element.shape_entry.a.middle_point(p_from_element.shape_entry.b);
       // Build vectors prev→curr and curr→next to detect a direction change.
       FloatPoint backtrack_cog = p_from_element.backtrack_door.get_shape().centre_of_gravity();
-      double prev_dx = from_mid.x - backtrack_cog.x;
-      double prev_dy = from_mid.y - backtrack_cog.y;
-      double next_dx = shape_entry_middle.x - from_mid.x;
-      double next_dy = shape_entry_middle.y - from_mid.y;
+      double prev_dx = from_shape_entry_middle.x - backtrack_cog.x;
+      double prev_dy = from_shape_entry_middle.y - backtrack_cog.y;
+      double next_dx = shape_entry_middle.x - from_shape_entry_middle.x;
+      double next_dy = shape_entry_middle.y - from_shape_entry_middle.y;
       double cross_product = prev_dx * next_dy - prev_dy * next_dx;
       double sq_len_prev = prev_dx * prev_dx + prev_dy * prev_dy;
       double sq_len_next = next_dx * next_dx + next_dy * next_dy;
@@ -735,9 +736,12 @@ public class MazeSearchAlgo {
 
     double local_scope_penalty = ctrl.routerIntentLocalScopePenalty(shape_entry_middle, layer);
     double pair_corridor_penalty = ctrl.routerIntentPairCorridorPenalty(shape_entry_middle, layer);
+    double path_length = p_from_element.path_length + shape_entry_middle.distance(from_shape_entry_middle);
+    double pair_skew_penalty = ctrl.routerIntentPairSkewPenalty(path_length, layer);
     double expansion_value = p_from_element.expansion_value + p_add_costs + bend_cost_penalty + local_scope_penalty
         + pair_corridor_penalty
-        + shape_entry_middle.weighted_distance(p_from_element.shape_entry.a.middle_point(p_from_element.shape_entry.b),
+        + pair_skew_penalty
+        + shape_entry_middle.weighted_distance(from_shape_entry_middle,
             ctrl.trace_costs[layer].horizontal,
             ctrl.trace_costs[layer].vertical);
     double sorting_value = expansion_value + this.destination_distance.calculate(shape_entry_middle, layer);
@@ -750,6 +754,7 @@ public class MazeSearchAlgo {
         p_from_element.door,
         p_from_element.section_no_of_door,
         expansion_value,
+        path_length,
         sorting_value,
         next_room,
         p_shape_entry,
@@ -769,6 +774,8 @@ public class MazeSearchAlgo {
         + ", room_ripped=" + room_ripped
         + ", local_scope_penalty=" + local_scope_penalty
         + ", pair_corridor_penalty=" + pair_corridor_penalty
+        + ", pair_skew_penalty=" + pair_skew_penalty
+        + ", path_length=" + path_length
         + ", expansion_value=" + expansion_value
         + ", sorting_value=" + sorting_value
         + ", door=" + describe_expandable(p_door)
@@ -920,7 +927,9 @@ public class MazeSearchAlgo {
     FloatPoint nearest_point = shrinked_drill_shape.nearest_point_approx(compare_corner);
     FloatLine shape_entry = new FloatLine(nearest_point, nearest_point);
     int section_no = layer - p_drill.first_layer;
-    double expansion_value = p_from_element.expansion_value + p_add_costs + nearest_point
+    double path_length = p_from_element.path_length + nearest_point.distance(compare_corner);
+    double pair_skew_penalty = ctrl.routerIntentPairSkewPenalty(path_length, layer);
+    double expansion_value = p_from_element.expansion_value + p_add_costs + pair_skew_penalty + nearest_point
         .weighted_distance(compare_corner, ctrl.trace_costs[layer].horizontal, ctrl.trace_costs[layer].vertical);
     ExpandableObject new_backtrack_door;
     int new_section_no_of_backtrack_door;
@@ -941,6 +950,7 @@ public class MazeSearchAlgo {
         new_backtrack_door,
         new_section_no_of_backtrack_door,
         expansion_value,
+        path_length,
         sorting_value,
         null,
         shape_entry,
@@ -952,6 +962,8 @@ public class MazeSearchAlgo {
         "drill=" + describe_expandable(p_drill)
             + ", room=" + describe_room(p_from_element.next_room)
             + ", nearest_point=" + nearest_point
+            + ", pair_skew_penalty=" + pair_skew_penalty
+            + ", path_length=" + path_length
             + ", expansion_value=" + expansion_value);
   }
 
@@ -978,6 +990,7 @@ public class MazeSearchAlgo {
         p_from_element.door,
         p_from_element.section_no_of_door,
         expansion_value,
+        p_from_element.path_length,
         sorting_value,
         p_from_element.next_room,
         p_from_element.shape_entry,
@@ -1177,6 +1190,7 @@ public class MazeSearchAlgo {
           curr_drill,
           p_list_element.section_no_of_door,
           expansion_value,
+          p_list_element.path_length,
           sorting_value,
           curr_drill.room_arr[curr_room_index],
           p_list_element.shape_entry,
@@ -1311,6 +1325,7 @@ public class MazeSearchAlgo {
             curr_door,
             0,
             null,
+            0,
             0,
             0,
             sorting_value,

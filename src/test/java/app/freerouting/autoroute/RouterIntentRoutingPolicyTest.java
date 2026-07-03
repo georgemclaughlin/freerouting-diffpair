@@ -229,6 +229,28 @@ class RouterIntentRoutingPolicyTest {
     assertEquals(0.0, RouterIntentRoutingPolicy.localScopeExitCostFactor(intent, "UNKNOWN_NET"));
   }
 
+  @Test
+  void differentialPairSkewExcessCostFactorOnlyAppliesToPairMembers() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "USB_D_PLUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL),
+        netIntent(
+            "USB_D_MINUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL));
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] {
+        differentialPair("usb2_data", "USB_D_PLUS", "USB_D_MINUS")
+    };
+
+    assertTrue(RouterIntentRoutingPolicy.differentialPairSkewExcessCostFactor(intent, "USB_D_PLUS") > 0.0);
+    assertTrue(RouterIntentRoutingPolicy.differentialPairSkewExcessCostFactor(intent, "USB_D_MINUS") > 0.0);
+    assertEquals(0.0, RouterIntentRoutingPolicy.differentialPairSkewExcessCostFactor(intent, "VBUS"));
+  }
+
   private RouterIntentSettings intentWith(RouterIntentSettings.NetIntent... netIntents) {
     RouterIntentSettings intent = new RouterIntentSettings();
     intent.netIntents = netIntents;

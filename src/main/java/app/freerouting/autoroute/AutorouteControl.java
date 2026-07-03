@@ -130,6 +130,7 @@ public class AutorouteControl {
   double min_cheap_via_cost;
   IntBox router_intent_local_region;
   IntBox[] router_intent_pair_corridors;
+  double router_intent_pair_allowed_length;
   String router_intent_net_name;
  
   /**
@@ -195,6 +196,7 @@ public class AutorouteControl {
     ripup_pass_no = 1;
     router_intent_local_region = null;
     router_intent_pair_corridors = new IntBox[0];
+    router_intent_pair_allowed_length = Double.NaN;
     router_intent_net_name = null;
   }
 
@@ -326,6 +328,35 @@ public class AutorouteControl {
 
     double averageTraceCost = (trace_costs[p_layer].horizontal + trace_costs[p_layer].vertical) / 2.0;
     return nearestDistance * averageTraceCost * factor;
+  }
+
+  void setRouterIntentPairAllowedLength(double p_allowed_length) {
+    router_intent_pair_allowed_length = p_allowed_length > 0.0 && Double.isFinite(p_allowed_length)
+        ? p_allowed_length
+        : Double.NaN;
+  }
+
+  double routerIntentPairSkewPenalty(double p_path_length, int p_layer) {
+    if (!Double.isFinite(router_intent_pair_allowed_length)
+        || !Double.isFinite(p_path_length)
+        || p_path_length <= router_intent_pair_allowed_length
+        || p_layer < 0
+        || p_layer >= trace_costs.length) {
+      return 0.0;
+    }
+
+    double factor = RouterIntentRoutingPolicy.differentialPairSkewExcessCostFactor(
+        this.settings.intent,
+        router_intent_net_name);
+    if (factor <= 0.0) {
+      return 0.0;
+    }
+
+    double averageTraceCost = (trace_costs[p_layer].horizontal + trace_costs[p_layer].vertical) / 2.0;
+    if (averageTraceCost <= 0.0) {
+      return 0.0;
+    }
+    return (p_path_length - router_intent_pair_allowed_length) * averageTraceCost * factor;
   }
 
   private static boolean isPureSmdNet(RoutingBoard p_board, int p_net_no) {

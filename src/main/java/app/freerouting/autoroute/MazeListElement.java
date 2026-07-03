@@ -29,6 +29,10 @@ public class MazeListElement implements Comparable<MazeListElement> {
    */
   final double expansion_value;
   /**
+   * The unweighted physical trace length from the start of the expansion.
+   */
+  final double path_length;
+  /**
    * The expansion value plus the shortest distance to a destination. The list is
    * sorted in ascending order by this value.
    */
@@ -59,6 +63,7 @@ public class MazeListElement implements Comparable<MazeListElement> {
       ExpandableObject p_backtrack_door,
       int p_section_no_of_backtrack_door,
       double p_expansion_value,
+      double p_path_length,
       double p_sorting_value,
       CompleteExpansionRoom p_next_room,
       FloatLine p_shape_entry,
@@ -70,6 +75,7 @@ public class MazeListElement implements Comparable<MazeListElement> {
     backtrack_door = p_backtrack_door;
     section_no_of_backtrack_door = p_section_no_of_backtrack_door;
     expansion_value = p_expansion_value;
+    path_length = p_path_length;
     sorting_value = p_sorting_value;
     next_room = p_next_room;
     shape_entry = p_shape_entry;

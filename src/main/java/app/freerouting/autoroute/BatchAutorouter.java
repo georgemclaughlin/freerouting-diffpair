@@ -13,6 +13,7 @@ import app.freerouting.board.Pin;
 import app.freerouting.board.PolylineTrace;
 import app.freerouting.board.RoutingBoard;
 import app.freerouting.board.Trace;
+import app.freerouting.board.Unit;
 import app.freerouting.board.Via;
 import app.freerouting.core.RouterCounters;
 import app.freerouting.core.RoutingJob;
@@ -1308,6 +1309,10 @@ public class BatchAutorouter extends NamedAlgorithm {
           autoroute_control,
           settings.intent,
           route_net == null ? null : route_net.name);
+      applyRouterIntentPairSkewLimit(
+          autoroute_control,
+          settings.intent,
+          route_net == null ? null : route_net.name);
       autoroute_control.ripup_allowed = true;
       autoroute_control.ripup_costs = this.start_ripup_costs * p_ripup_pass_no;
       autoroute_control.remove_unconnected_vias = this.remove_unconnected_vias;
@@ -1739,6 +1744,37 @@ public class BatchAutorouter extends NamedAlgorithm {
         control.add_via_costs[fromLayer].to_layer[toLayer] += penalty;
       }
     }
+  }
+
+  void applyRouterIntentPairSkewLimit(
+      AutorouteControl control,
+      RouterIntentSettings intent,
+      String routeNetName) {
+    if (control == null || intent == null || routeNetName == null || this.board == null || this.board.rules == null) {
+      return;
+    }
+
+    String siblingNetName = intent.differentialPairSiblingNetForNet(routeNetName);
+    if (siblingNetName == null) {
+      return;
+    }
+
+    Net siblingNet = this.board.rules.nets.get(siblingNetName, 1);
+    if (siblingNet == null) {
+      return;
+    }
+
+    double siblingLength = siblingNet.get_trace_length();
+    if (siblingLength <= 0.0 || !Double.isFinite(siblingLength)) {
+      return;
+    }
+
+    Double maxSkewMm = intent.differentialPairMaxSkewMmForNet(routeNetName);
+    double allowedSkew = 0.0;
+    if (maxSkewMm != null && maxSkewMm > 0.0 && this.board.communication != null) {
+      allowedSkew = maxSkewMm * this.board.communication.get_resolution(Unit.MM);
+    }
+    control.setRouterIntentPairAllowedLength(siblingLength + allowedSkew);
   }
 
   private boolean[][] routedDifferentialPairSiblingViaTransitions(
