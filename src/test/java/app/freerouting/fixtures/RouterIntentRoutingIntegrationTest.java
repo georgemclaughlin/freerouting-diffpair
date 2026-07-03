@@ -3,10 +3,14 @@ package app.freerouting.fixtures;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import app.freerouting.board.PolylineTrace;
 import app.freerouting.board.Trace;
+import app.freerouting.board.Unit;
 import app.freerouting.board.Via;
 import app.freerouting.core.RoutingJob;
 import app.freerouting.drc.DesignRulesChecker;
+import app.freerouting.geometry.planar.FloatPoint;
+import app.freerouting.geometry.planar.IntBox;
 import app.freerouting.rules.Net;
 import app.freerouting.settings.RouterIntentSettings;
 import app.freerouting.settings.sources.TestingSettings;
@@ -18,6 +22,12 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
   private static final String FIXTURE = "Issue269-min_fr_test/min_fr_test.dsn";
   private static final String STEERED_NET = "Net-(J1-Pin_1)";
   private static final String RIPUP_FIXTURE = "router-intent-ripup-cost.dsn";
+  private static final String LOCAL_SCOPE_CORRIDOR_FIXTURE = "router-intent-local-scope-corridor.dsn";
+  private static final String LOCAL_NET = "LOCAL";
+  private static final double LOCAL_SCOPE_MARGIN_MM = 15.0;
+  private static final double LOCAL_LEFT_PAD_X_UM = 10000.0;
+  private static final double LOCAL_RIGHT_PAD_X_UM = 90000.0;
+  private static final double LOCAL_PAD_Y_UM = -35000.0;
 
   @Test
   void preferredLayerIntentChangesRoutedGeometry() {
@@ -80,6 +90,26 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
         "expected protected ripup intent to route CROSS around KEEP instead of ripping through it");
   }
 
+  @Test
+  void localScopeIntentReducesRouteExcursion() {
+    RouterIntentSettings localIntent = localScopeIntent(LOCAL_NET, LOCAL_SCOPE_MARGIN_MM, "L1.1", "L2.1");
+    RoutingJob baseline = routeWithIntent(LOCAL_SCOPE_CORRIDOR_FIXTURE, null, LOCAL_NET, 0);
+    RoutingJob scoped = routeWithIntent(LOCAL_SCOPE_CORRIDOR_FIXTURE, localIntent, LOCAL_NET, 0);
+
+    double baselineExcursion = routedLocalScopeExcursionMm(baseline, LOCAL_NET);
+    double scopedExcursion = routedLocalScopeExcursionMm(scoped, LOCAL_NET);
+
+    assertTrue(
+        scopedExcursion < baselineExcursion,
+        "expected local-scope intent to choose lower-excursion geometry; baseline="
+            + baselineExcursion
+            + ", scoped="
+            + scopedExcursion);
+    assertTrue(
+        routedLength(scoped, LOCAL_NET) > routedLength(baseline, LOCAL_NET),
+        "expected lower-excursion local route to accept a longer in-region corridor");
+  }
+
   private RoutingJob routeWithIntent(RouterIntentSettings intent) {
     return routeWithIntent(FIXTURE, intent, STEERED_NET, 1);
   }
@@ -138,6 +168,27 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
     return intent;
   }
 
+  private RouterIntentSettings localScopeIntent(String netName, double maxDistanceMm, String... padRefs) {
+    RouterIntentSettings.NetIntent netIntent = new RouterIntentSettings.NetIntent();
+    netIntent.net = netName;
+    netIntent.priority = RouterIntentSettings.Priority.NORMAL;
+    netIntent.scope = RouterIntentSettings.Scope.LOCAL;
+    netIntent.ripupProtection = RouterIntentSettings.RipupProtection.NONE;
+
+    RouterIntentSettings.LocalSupportIntent localSupport = new RouterIntentSettings.LocalSupportIntent();
+    localSupport.id = "local_scope_geometry_test";
+    localSupport.kind = RouterIntentSettings.LocalSupportKind.SAME_NET_PAD_TIE;
+    localSupport.nets = new String[] { netName };
+    localSupport.padRefs = padRefs;
+    localSupport.priority = RouterIntentSettings.Priority.NORMAL;
+    localSupport.maxDistanceMm = maxDistanceMm;
+
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.netIntents = new RouterIntentSettings.NetIntent[] { netIntent };
+    intent.localSupport = new RouterIntentSettings.LocalSupportIntent[] { localSupport };
+    return intent;
+  }
+
   private double routedLengthOnLayer(RoutingJob job, String netName, String layerName) {
     Net net = job.board.rules.nets.get(netName, 1);
     int layer = layerIndex(job, layerName);
@@ -156,6 +207,38 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
     for (Trace trace : job.board.get_traces()) {
       if (trace.contains_net(net.net_number)) {
         result += trace.get_length();
+      }
+    }
+    return result;
+  }
+
+  private double routedLocalScopeExcursionMm(RoutingJob job, String netName) {
+    Net net = job.board.rules.nets.get(netName, 1);
+    double scale = job.board.communication.resolution;
+    double marginUm = LOCAL_SCOPE_MARGIN_MM * 1000.0;
+    IntBox localRegion = new IntBox(
+        (int) Math.floor((LOCAL_LEFT_PAD_X_UM - marginUm) * scale),
+        (int) Math.floor((LOCAL_PAD_Y_UM - marginUm) * scale),
+        (int) Math.ceil((LOCAL_RIGHT_PAD_X_UM + marginUm) * scale),
+        (int) Math.ceil((LOCAL_PAD_Y_UM + marginUm) * scale));
+    double mmResolution = job.board.communication.get_resolution(Unit.MM);
+
+    double result = 0.0;
+    for (Trace trace : job.board.get_traces()) {
+      if (!trace.contains_net(net.net_number)) {
+        continue;
+      }
+      FloatPoint[] points = trace instanceof PolylineTrace polylineTrace
+          ? polylineTrace.polyline().corner_approx_arr()
+          : new FloatPoint[] { trace.first_corner().to_float(), trace.last_corner().to_float() };
+      for (FloatPoint point : points) {
+        if (point.x >= localRegion.ll.x
+            && point.x <= localRegion.ur.x
+            && point.y >= localRegion.ll.y
+            && point.y <= localRegion.ur.y) {
+          continue;
+        }
+        result += point.distance(localRegion.nearest_point(point)) / mmResolution;
       }
     }
     return result;
