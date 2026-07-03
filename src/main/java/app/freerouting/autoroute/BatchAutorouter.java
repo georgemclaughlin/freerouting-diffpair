@@ -980,7 +980,7 @@ public class BatchAutorouter extends NamedAlgorithm {
           // trigger a restore — if every board has the same (possibly zero) score the old
           // ">=" test would restore on every check cycle, growing the history unboundedly
           // and never stopping.
-          if (bh.getMaxScore() > boardScoreAfter) {
+          if (boardStatisticsAfter.connections.incompleteCount > 0 && bh.getMaxScore() > boardScoreAfter) {
             var boardToRestore = bh.restoreBoard(MAXIMUM_TRIES_ON_THE_SAME_BOARD);
             if (boardToRestore == null) {
               job.logInfo("The router was not able to improve the board, stopping the auto-router.");
@@ -1162,7 +1162,8 @@ public class BatchAutorouter extends NamedAlgorithm {
     // completed pass, which may be worse than an earlier pass that was recorded in the history.
     float currentFinalScore = normalizedBoardScore(this.board);
     float bestHistoryScore = bh.getMaxScore();
-    if (bestHistoryScore > currentFinalScore) {
+    int currentFinalIncompleteCount = calculateIncompleteCount(this.board);
+    if (currentFinalIncompleteCount > 0 && bestHistoryScore > currentFinalScore) {
       RoutingBoard bestBoard = bh.restoreBestBoard();
       if (bestBoard != null) {
         BoardStatistics currentStats = new BoardStatistics(this.board);

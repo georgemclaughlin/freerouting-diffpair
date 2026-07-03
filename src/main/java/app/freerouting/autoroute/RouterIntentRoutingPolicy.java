@@ -5,10 +5,10 @@ import app.freerouting.settings.RouterIntentSettings;
 final class RouterIntentRoutingPolicy {
   private static final double NON_PREFERRED_LAYER_COST_FACTOR = 4.0;
   private static final double CRITICAL_NET_VIA_COST_FACTOR = 1.5;
-  private static final double LOCAL_SUPPORT_VIA_COST_FACTOR = 2.0;
+  private static final double LOCAL_SUPPORT_VIA_COST_FACTOR = 1.2;
   private static final double SOURCE_COPPER_VIA_COST_FACTOR = 3.0;
   private static final double CRITICAL_NET_RIPUP_COST_FACTOR = 2.0;
-  private static final double LOCAL_SUPPORT_RIPUP_COST_FACTOR = 4.0;
+  private static final double LOCAL_SUPPORT_RIPUP_COST_FACTOR = 1.2;
   private static final double SOURCE_COPPER_RIPUP_COST_FACTOR = 8.0;
   private static final double LOCAL_SCOPE_EXIT_COST_FACTOR = 6.0;
 

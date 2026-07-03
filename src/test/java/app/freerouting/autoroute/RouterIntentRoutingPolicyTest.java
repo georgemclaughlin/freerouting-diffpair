@@ -82,7 +82,7 @@ class RouterIntentRoutingPolicyTest {
 
     assertEquals(1.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "NORMAL_NET"));
     assertEquals(1.5, RouterIntentRoutingPolicy.viaCostFactor(intent, "CRITICAL_NET"));
-    assertEquals(2.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "LOCAL_SUPPORT_NET"));
+    assertEquals(1.2, RouterIntentRoutingPolicy.viaCostFactor(intent, "LOCAL_SUPPORT_NET"));
     assertEquals(3.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "SOURCE_COPPER_NET"));
     assertEquals(1.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "UNKNOWN_NET"));
   }
@@ -113,7 +113,7 @@ class RouterIntentRoutingPolicyTest {
 
     assertEquals(1.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "NORMAL_NET"));
     assertEquals(2.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "CRITICAL_NET"));
-    assertEquals(4.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "LOCAL_SUPPORT_NET"));
+    assertEquals(1.2, RouterIntentRoutingPolicy.ripupCostFactor(intent, "LOCAL_SUPPORT_NET"));
     assertEquals(8.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "SOURCE_COPPER_NET"));
     assertEquals(1.0, RouterIntentRoutingPolicy.ripupCostFactor(intent, "UNKNOWN_NET"));
   }
