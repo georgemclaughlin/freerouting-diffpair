@@ -3,6 +3,7 @@ package app.freerouting.autoroute;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import app.freerouting.board.Unit;
 import app.freerouting.board.Via;
 import app.freerouting.core.RoutingJob;
 import app.freerouting.core.scoring.BoardStatistics;
@@ -60,6 +61,25 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
     assertEquals(Math.max(0f, baselineGenericScore - baselinePenalty), baselineIntentScore, 0.001f);
   }
 
+  @Test
+  void penalizesCriticalPathExcessLengthWithoutNetIntent() {
+    RoutingJob routed = routedViaFixture(null);
+    double routedLengthMm = traceLengthMm(routed, STEERED_NET);
+    double maxLengthMm = routedLengthMm - 0.5;
+    RouterIntentSettings intent = criticalPathIntent(STEERED_NET, maxLengthMm);
+
+    float genericScore = new BoardStatistics(routed.board).getNormalizedScore(routed.routerSettings.scoring);
+    float lengthPenalty = RouterIntentBoardScorer.criticalPathExcessLengthPenalty(routed.board, intent);
+    float intentScore = RouterIntentBoardScorer.normalizedScore(
+        routed.board,
+        routed.routerSettings.scoring,
+        intent);
+
+    assertTrue(routedLengthMm > 0.5, "fixture should route enough copper for a bounded excess-length check");
+    assertEquals(15f, lengthPenalty, 0.001f);
+    assertEquals(Math.max(0f, genericScore - lengthPenalty), intentScore, 0.001f);
+  }
+
   private RoutingJob routedRipupFixture() {
     TestingSettings settings = new TestingSettings();
     settings.setMaxPasses(20);
@@ -105,6 +125,18 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
     return intent;
   }
 
+  private RouterIntentSettings criticalPathIntent(String netName, double maxLengthMm) {
+    RouterIntentSettings.CriticalPathIntent criticalPath = new RouterIntentSettings.CriticalPathIntent();
+    criticalPath.id = "critical_path_length_test";
+    criticalPath.net = netName;
+    criticalPath.priority = RouterIntentSettings.Priority.CRITICAL;
+    criticalPath.maxLengthMm = maxLengthMm;
+
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.criticalPaths = new RouterIntentSettings.CriticalPathIntent[] { criticalPath };
+    return intent;
+  }
+
   private int incompleteCount(RoutingJob job, String netName) {
     Net net = job.board.rules.nets.get(netName, 1);
     return new DesignRulesChecker(job.board, null).getIncompleteCount(net.net_number);
@@ -119,5 +151,10 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
       }
     }
     return result;
+  }
+
+  private double traceLengthMm(RoutingJob job, String netName) {
+    Net net = job.board.rules.nets.get(netName, 1);
+    return net.get_trace_length() / job.board.communication.get_resolution(Unit.MM);
   }
 }

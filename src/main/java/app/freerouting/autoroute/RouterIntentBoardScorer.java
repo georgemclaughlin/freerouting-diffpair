@@ -1,6 +1,7 @@
 package app.freerouting.autoroute;
 
 import app.freerouting.board.RoutingBoard;
+import app.freerouting.board.Unit;
 import app.freerouting.board.Via;
 import app.freerouting.core.scoring.BoardStatistics;
 import app.freerouting.drc.DesignRulesChecker;
@@ -11,6 +12,7 @@ import app.freerouting.settings.RouterScoringSettings;
 final class RouterIntentBoardScorer {
   private static final float INTENT_INCOMPLETE_PENALTY_POINTS = 25f;
   private static final float PROTECTED_VIA_PENALTY_POINTS = 20f;
+  private static final float CRITICAL_PATH_EXCESS_LENGTH_PENALTY_POINTS_PER_MM = 10f;
 
   private RouterIntentBoardScorer() {
   }
@@ -20,11 +22,12 @@ final class RouterIntentBoardScorer {
       RouterScoringSettings scoringSettings,
       RouterIntentSettings intent) {
     float baseScore = new BoardStatistics(board).getNormalizedScore(scoringSettings);
-    if (intent == null || !intent.hasNetIntents()) {
+    if (!hasScoringIntent(intent)) {
       return baseScore;
     }
     float intentPenalty = intentIncompletePenalty(board, intent)
-        + protectedViaPenalty(board, intent);
+        + protectedViaPenalty(board, intent)
+        + criticalPathExcessLengthPenalty(board, intent);
     return Math.max(0f, baseScore - intentPenalty);
   }
 
@@ -74,9 +77,65 @@ final class RouterIntentBoardScorer {
     return penalty;
   }
 
+  static float criticalPathExcessLengthPenalty(RoutingBoard board, RouterIntentSettings intent) {
+    if (board == null
+        || board.rules == null
+        || intent == null
+        || intent.criticalPaths == null
+        || intent.criticalPaths.length == 0) {
+      return 0f;
+    }
+
+    double mmResolution = board.communication.get_resolution(Unit.MM);
+    if (mmResolution <= 0) {
+      return 0f;
+    }
+
+    float penalty = 0f;
+    for (RouterIntentSettings.CriticalPathIntent criticalPath : intent.criticalPaths) {
+      if (criticalPath == null
+          || criticalPath.net == null
+          || criticalPath.maxLengthMm == null
+          || criticalPath.maxLengthMm <= 0) {
+        continue;
+      }
+
+      Net net = board.rules.nets.get(criticalPath.net, 1);
+      if (net == null) {
+        continue;
+      }
+
+      double routedLengthMm = net.get_trace_length() / mmResolution;
+      double excessMm = routedLengthMm - criticalPath.maxLengthMm;
+      if (excessMm > 0) {
+        penalty += excessMm
+            * criticalPathPriorityRank(criticalPath)
+            * CRITICAL_PATH_EXCESS_LENGTH_PENALTY_POINTS_PER_MM;
+      }
+    }
+    return penalty;
+  }
+
+  private static boolean hasScoringIntent(RouterIntentSettings intent) {
+    return intent != null
+        && (intent.hasNetIntents()
+            || (intent.criticalPaths != null && intent.criticalPaths.length > 0));
+  }
+
   private static int intentRank(RouterIntentSettings intent, String netName) {
     return intent.priorityRankForNet(netName)
         + intent.scopeRankForNet(netName)
         + intent.ripupProtectionRankForNet(netName);
+  }
+
+  private static int criticalPathPriorityRank(RouterIntentSettings.CriticalPathIntent criticalPath) {
+    if (criticalPath.priority == null) {
+      return 1;
+    }
+    return switch (criticalPath.priority) {
+      case NORMAL -> 1;
+      case HIGH -> 2;
+      case CRITICAL -> 3;
+    };
   }
 }
