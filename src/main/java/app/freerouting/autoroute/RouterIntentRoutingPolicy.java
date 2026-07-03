@@ -16,6 +16,7 @@ final class RouterIntentRoutingPolicy {
   private static final double DIFFERENTIAL_PAIR_EXTRA_VIA_COST_FACTOR = 1.5;
   private static final double DIFFERENTIAL_PAIR_UNMATCHED_VIA_TRANSITION_COST_FACTOR = 0.5;
   private static final double DIFFERENTIAL_PAIR_SKEW_EXCESS_COST_FACTOR = 1.0;
+  private static final double DIFFERENTIAL_PAIR_CORRIDOR_OBSTACLE_RIPUP_COST_FACTOR = 0.25;
 
   private RouterIntentRoutingPolicy() {
   }
@@ -108,6 +109,12 @@ final class RouterIntentRoutingPolicy {
     return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
         ? DIFFERENTIAL_PAIR_SKEW_EXCESS_COST_FACTOR
         : 0.0;
+  }
+
+  static double differentialPairCorridorObstacleRipupCostFactor(RouterIntentSettings intent, String netName) {
+    return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
+        ? DIFFERENTIAL_PAIR_CORRIDOR_OBSTACLE_RIPUP_COST_FACTOR
+        : 1.0;
   }
 
   private static double differentialPairViaCostFactor(RouterIntentSettings intent, String netName) {

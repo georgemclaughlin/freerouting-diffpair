@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import app.freerouting.Freerouting;
 import app.freerouting.board.FixedState;
 import app.freerouting.board.RoutingBoard;
+import app.freerouting.board.Trace;
 import app.freerouting.board.Unit;
 import app.freerouting.geometry.planar.FloatPoint;
 import app.freerouting.geometry.planar.IntBox;
@@ -192,6 +193,55 @@ class BatchAutorouterRouterIntentTest {
   }
 
   @Test
+  void pairCorridorReservationDiscountsForeignObstaclesOnlyInsideSiblingCorridor() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net positive = board.rules.nets.get(USB_D_PLUS, 1);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(positive);
+    assertNotNull(negative);
+    Trace siblingTrace = insertSiblingTrace(board, positive, 1);
+    Net foreign = board.rules.nets.add("VBUS", 1, false);
+    Trace crossingCorridor = insertTrace(
+        board,
+        foreign,
+        1,
+        new Point[] {
+            new IntPoint(50_000, -25_000),
+            new IntPoint(50_000, -15_000)
+        });
+    Trace outsideCorridor = insertTrace(
+        board,
+        foreign,
+        1,
+        new Point[] {
+            new IntPoint(50_000, -55_000),
+            new IntPoint(90_000, -55_000)
+        });
+
+    RouterSettings settings = routerSettings(board);
+    BatchAutorouter router = new BatchAutorouter(
+        null,
+        board,
+        settings,
+        true,
+        false,
+        settings.get_start_ripup_costs(),
+        500);
+    AutorouteControl control = new AutorouteControl(
+        board,
+        negative.net_number,
+        settings,
+        settings.get_via_costs(),
+        router.traceCostsForRouterIntent(negative.net_number));
+
+    router.applyRouterIntentPairCorridors(control, settings.intent, USB_D_MINUS);
+
+    assertTrue(control.routerIntentPairCorridorRipupCostFactor(crossingCorridor) < 1.0);
+    assertEquals(1.0, control.routerIntentPairCorridorRipupCostFactor(outsideCorridor));
+    assertEquals(1.0, control.routerIntentPairCorridorRipupCostFactor(siblingTrace));
+  }
+
+  @Test
   void differentialPairSkewLimitPenalizesOverlongCandidatePathsBeforeMazeSearch() throws Exception {
     RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
     Net positive = board.rules.nets.get(USB_D_PLUS, 1);
@@ -281,19 +331,42 @@ class BatchAutorouterRouterIntentTest {
     assertTrue(control.add_via_costs[1].to_layer[3] > 0);
   }
 
-  private void insertSiblingTrace(RoutingBoard board, Net net, int layer) {
-    int halfWidth = board.rules.get_trace_half_width(net.net_number, layer);
-    int clearanceClass = net.get_class().get_trace_clearance_class();
-    board.insert_trace(
+  private Trace insertSiblingTrace(RoutingBoard board, Net net, int layer) {
+    return insertTrace(
+        board,
+        net,
+        layer,
         new Point[] {
             new IntPoint(10_000, -20_000),
             new IntPoint(90_000, -20_000)
-        },
+        });
+  }
+
+  private Trace insertTrace(RoutingBoard board, Net net, int layer, Point[] points) {
+    int halfWidth = board.rules.get_trace_half_width(net.net_number, layer);
+    int clearanceClass = net.get_class().get_trace_clearance_class();
+    board.insert_trace(
+        points,
         layer,
         halfWidth,
         new int[] { net.net_number },
         clearanceClass,
         FixedState.UNFIXED);
+    return findTrace(board, net, layer, points[0], points[points.length - 1]);
+  }
+
+  private Trace findTrace(RoutingBoard board, Net net, int layer, Point start, Point end) {
+    for (Trace trace : board.get_traces()) {
+      if (!trace.contains_net(net.net_number) || trace.get_layer() != layer) {
+        continue;
+      }
+      boolean sameDirection = start.equals(trace.first_corner()) && end.equals(trace.last_corner());
+      boolean reverseDirection = end.equals(trace.first_corner()) && start.equals(trace.last_corner());
+      if (sameDirection || reverseDirection) {
+        return trace;
+      }
+    }
+    throw new IllegalStateException("inserted trace was not found for net " + net.name);
   }
 
   private void insertSiblingVia(RoutingBoard board, Net net) {

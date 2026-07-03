@@ -14,6 +14,7 @@ import app.freerouting.rules.ViaInfo;
 import app.freerouting.rules.ViaRule;
 import app.freerouting.settings.RouterSettings;
 
+import java.util.Arrays;
 import java.util.Collection;
 
 /**
@@ -130,6 +131,8 @@ public class AutorouteControl {
   double min_cheap_via_cost;
   IntBox router_intent_local_region;
   IntBox[] router_intent_pair_corridors;
+  int[] router_intent_pair_corridor_layers;
+  int router_intent_pair_sibling_net_no;
   double router_intent_pair_allowed_length;
   String router_intent_net_name;
  
@@ -196,6 +199,8 @@ public class AutorouteControl {
     ripup_pass_no = 1;
     router_intent_local_region = null;
     router_intent_pair_corridors = new IntBox[0];
+    router_intent_pair_corridor_layers = new int[0];
+    router_intent_pair_sibling_net_no = -1;
     router_intent_pair_allowed_length = Double.NaN;
     router_intent_net_name = null;
   }
@@ -296,7 +301,20 @@ public class AutorouteControl {
   }
 
   void setRouterIntentPairCorridors(IntBox[] p_corridors) {
-    router_intent_pair_corridors = p_corridors != null ? p_corridors : new IntBox[0];
+    setRouterIntentPairCorridors(p_corridors, null, -1);
+  }
+
+  void setRouterIntentPairCorridors(IntBox[] p_corridors, int[] p_layers, int p_sibling_net_no) {
+    router_intent_pair_corridors = p_corridors != null
+        ? Arrays.copyOf(p_corridors, p_corridors.length)
+        : new IntBox[0];
+    router_intent_pair_corridor_layers = new int[router_intent_pair_corridors.length];
+    Arrays.fill(router_intent_pair_corridor_layers, -1);
+    if (p_layers != null) {
+      int layerCount = Math.min(p_layers.length, router_intent_pair_corridor_layers.length);
+      System.arraycopy(p_layers, 0, router_intent_pair_corridor_layers, 0, layerCount);
+    }
+    router_intent_pair_sibling_net_no = p_sibling_net_no > 0 ? p_sibling_net_no : -1;
   }
 
   double routerIntentPairCorridorPenalty(FloatPoint p_point, int p_layer) {
@@ -330,6 +348,17 @@ public class AutorouteControl {
     return nearestDistance * averageTraceCost * factor;
   }
 
+  double routerIntentPairCorridorRipupCostFactor(Item p_obstacle_item) {
+    if (!routerIntentPairCorridorReservesObstacle(p_obstacle_item)) {
+      return 1.0;
+    }
+
+    double factor = RouterIntentRoutingPolicy.differentialPairCorridorObstacleRipupCostFactor(
+        this.settings.intent,
+        router_intent_net_name);
+    return factor > 0.0 && factor < 1.0 ? factor : 1.0;
+  }
+
   void setRouterIntentPairAllowedLength(double p_allowed_length) {
     router_intent_pair_allowed_length = p_allowed_length > 0.0 && Double.isFinite(p_allowed_length)
         ? p_allowed_length
@@ -357,6 +386,36 @@ public class AutorouteControl {
       return 0.0;
     }
     return (p_path_length - router_intent_pair_allowed_length) * averageTraceCost * factor;
+  }
+
+  private boolean routerIntentPairCorridorReservesObstacle(Item p_obstacle_item) {
+    if (p_obstacle_item == null
+        || router_intent_pair_corridors == null
+        || router_intent_pair_corridors.length == 0
+        || p_obstacle_item.contains_net(net_no)
+        || (router_intent_pair_sibling_net_no > 0 && p_obstacle_item.contains_net(router_intent_pair_sibling_net_no))) {
+      return false;
+    }
+
+    IntBox obstacleBox = p_obstacle_item.bounding_box();
+    if (obstacleBox == null || obstacleBox.is_empty()) {
+      return false;
+    }
+
+    for (int i = 0; i < router_intent_pair_corridors.length; i++) {
+      IntBox corridor = router_intent_pair_corridors[i];
+      if (corridor == null || corridor.is_empty() || !corridor.intersects(obstacleBox)) {
+        continue;
+      }
+
+      int corridorLayer = i < router_intent_pair_corridor_layers.length
+          ? router_intent_pair_corridor_layers[i]
+          : -1;
+      if (corridorLayer < 0 || p_obstacle_item.is_on_layer(corridorLayer)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static boolean isPureSmdNet(RoutingBoard p_board, int p_net_no) {

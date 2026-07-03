@@ -1439,7 +1439,9 @@ public class MazeSearchAlgo {
     }
 
      double intent_ripup_cost_factor = routerIntentRipupCostFactor(p_obstacle_item);
-     double ripup_cost = this.ctrl.ripup_costs * cost_factor * intent_ripup_cost_factor;
+     double pair_corridor_ripup_cost_factor = this.ctrl.routerIntentPairCorridorRipupCostFactor(p_obstacle_item);
+     double ripup_cost = this.ctrl.ripup_costs * cost_factor * intent_ripup_cost_factor
+         * pair_corridor_ripup_cost_factor;
      double detour = 1;
      double trace_length = 0;
      double min_trace_length = 0;
@@ -1492,6 +1494,7 @@ public class MazeSearchAlgo {
         + ", half_width=" + cost_factor
         + ", ripup_costs=" + this.ctrl.ripup_costs
         + ", intent_ripup_cost_factor=" + intent_ripup_cost_factor
+        + ", pair_corridor_ripup_cost_factor=" + pair_corridor_ripup_cost_factor
         + ", trace_length=" + trace_length
         + ", min_trace_length=" + min_trace_length
         + ", item_count=" + item_count

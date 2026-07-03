@@ -1303,8 +1303,10 @@ public class BatchAutorouter extends NamedAlgorithm {
       // working on
       AutorouteControl autoroute_control = new AutorouteControl(this.board, p_route_net_no, settings, curr_via_costs,
           traceCostsForRouterIntent(p_route_net_no));
-      autoroute_control.setRouterIntentPairCorridors(
-          routedDifferentialPairSiblingCorridors(settings.intent, route_net == null ? null : route_net.name));
+      applyRouterIntentPairCorridors(
+          autoroute_control,
+          settings.intent,
+          route_net == null ? null : route_net.name);
       applyRouterIntentPairViaTransitionCosts(
           autoroute_control,
           settings.intent,
@@ -1712,6 +1714,31 @@ public class BatchAutorouter extends NamedAlgorithm {
     return result.toArray(new IntBox[0]);
   }
 
+  int[] routedDifferentialPairSiblingCorridorLayers(RouterIntentSettings intent, String routeNetName) {
+    List<Integer> result = new ArrayList<>();
+    for (Trace trace : routedDifferentialPairSiblingTraces(intent, routeNetName)) {
+      IntBox box = trace.bounding_box();
+      if (box == null || box.is_empty()) {
+        continue;
+      }
+      result.add(trace.get_layer());
+    }
+    return result.stream().mapToInt(Integer::intValue).toArray();
+  }
+
+  void applyRouterIntentPairCorridors(
+      AutorouteControl control,
+      RouterIntentSettings intent,
+      String routeNetName) {
+    if (control == null) {
+      return;
+    }
+    control.setRouterIntentPairCorridors(
+        routedDifferentialPairSiblingCorridors(intent, routeNetName),
+        routedDifferentialPairSiblingCorridorLayers(intent, routeNetName),
+        differentialPairSiblingNetNumber(intent, routeNetName));
+  }
+
   void applyRouterIntentPairViaTransitionCosts(
       AutorouteControl control,
       RouterIntentSettings intent,
@@ -1775,6 +1802,20 @@ public class BatchAutorouter extends NamedAlgorithm {
       allowedSkew = maxSkewMm * this.board.communication.get_resolution(Unit.MM);
     }
     control.setRouterIntentPairAllowedLength(siblingLength + allowedSkew);
+  }
+
+  private int differentialPairSiblingNetNumber(RouterIntentSettings intent, String routeNetName) {
+    if (intent == null || routeNetName == null || this.board == null || this.board.rules == null) {
+      return -1;
+    }
+
+    String siblingNetName = intent.differentialPairSiblingNetForNet(routeNetName);
+    if (siblingNetName == null) {
+      return -1;
+    }
+
+    Net siblingNet = this.board.rules.nets.get(siblingNetName, 1);
+    return siblingNet == null ? -1 : siblingNet.net_number;
   }
 
   private boolean[][] routedDifferentialPairSiblingViaTransitions(
