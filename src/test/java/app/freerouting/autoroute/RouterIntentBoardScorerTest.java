@@ -17,14 +17,17 @@ import org.junit.jupiter.api.Test;
 
 class RouterIntentBoardScorerTest extends RoutingFixtureTest {
   private static final String VIA_FIXTURE = "Issue269-min_fr_test/min_fr_test.dsn";
+  private static final String RIPUP_FIXTURE = "router-intent-ripup-cost.dsn";
   private static final String STEERED_NET = "Net-(J1-Pin_1)";
+  private static final String KEEP_NET = "KEEP";
+  private static final String CROSS_NET = "CROSS";
 
   @Test
   void penalizesIncompleteIntentNetsWithoutChangingGenericScore() {
     RoutingJob job = routedRipupFixture();
-    RouterIntentSettings intent = protectedNetIntent("KEEP");
+    RouterIntentSettings intent = protectedNetIntent(KEEP_NET);
 
-    assertEquals(1, incompleteCount(job, "KEEP"));
+    assertEquals(1, incompleteCount(job, KEEP_NET));
 
     float genericScore = new BoardStatistics(job.board).getNormalizedScore(job.routerSettings.scoring);
     float noIntentScore = RouterIntentBoardScorer.normalizedScore(job.board, job.routerSettings.scoring, null);
@@ -80,18 +83,57 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
     assertEquals(Math.max(0f, genericScore - lengthPenalty), intentScore, 0.001f);
   }
 
+  @Test
+  void penalizesDifferentialPairSkewWithoutNetIntent() {
+    RoutingJob routed = routedProtectedRipupFixture();
+    double keepLengthMm = traceLengthMm(routed, KEEP_NET);
+    double crossLengthMm = traceLengthMm(routed, CROSS_NET);
+    double skewMm = Math.abs(keepLengthMm - crossLengthMm);
+    RouterIntentSettings intent = differentialPairIntent(KEEP_NET, CROSS_NET, skewMm - 0.5);
+
+    float genericScore = new BoardStatistics(routed.board).getNormalizedScore(routed.routerSettings.scoring);
+    float skewPenalty = RouterIntentBoardScorer.differentialPairSkewPenalty(routed.board, intent);
+    float intentScore = RouterIntentBoardScorer.normalizedScore(
+        routed.board,
+        routed.routerSettings.scoring,
+        intent);
+
+    assertEquals(0, incompleteCount(routed, KEEP_NET));
+    assertEquals(0, incompleteCount(routed, CROSS_NET));
+    assertTrue(skewMm > 0.5, "fixture should route the two nets with measurable length skew");
+    assertEquals(30f, skewPenalty, 0.001f);
+    assertEquals(Math.max(0f, genericScore - skewPenalty), intentScore, 0.001f);
+  }
+
   private RoutingJob routedRipupFixture() {
     TestingSettings settings = new TestingSettings();
     settings.setMaxPasses(20);
     settings.setJobTimeoutString("00:00:30");
     settings.setOptimizerEnabled(false);
 
-    RoutingJob job = GetRoutingJob("router-intent-ripup-cost.dsn", settings);
+    RoutingJob job = GetRoutingJob(RIPUP_FIXTURE, settings);
     job.routerSettings.set_start_ripup_costs(1);
     RunRoutingJob(job);
-    assertRoutingResult(job, "router-intent-ripup-cost.dsn")
+    assertRoutingResult(job, RIPUP_FIXTURE)
         .maxDuration(Duration.ofSeconds(30))
         .maxIncompleteConnections(1)
+        .check();
+    return job;
+  }
+
+  private RoutingJob routedProtectedRipupFixture() {
+    TestingSettings settings = new TestingSettings();
+    settings.setMaxPasses(20);
+    settings.setJobTimeoutString("00:00:30");
+    settings.setOptimizerEnabled(false);
+
+    RoutingJob job = GetRoutingJob(RIPUP_FIXTURE, settings);
+    job.routerSettings.intent = protectedNetIntent(KEEP_NET);
+    job.routerSettings.set_start_ripup_costs(1);
+    RunRoutingJob(job);
+    assertRoutingResult(job, RIPUP_FIXTURE)
+        .maxDuration(Duration.ofSeconds(30))
+        .maxIncompleteConnections(0)
         .check();
     return job;
   }
@@ -134,6 +176,19 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
 
     RouterIntentSettings intent = new RouterIntentSettings();
     intent.criticalPaths = new RouterIntentSettings.CriticalPathIntent[] { criticalPath };
+    return intent;
+  }
+
+  private RouterIntentSettings differentialPairIntent(String positiveNet, String negativeNet, double maxSkewMm) {
+    RouterIntentSettings.DifferentialPairIntent differentialPair = new RouterIntentSettings.DifferentialPairIntent();
+    differentialPair.id = "differential_pair_skew_test";
+    differentialPair.positiveNet = positiveNet;
+    differentialPair.negativeNet = negativeNet;
+    differentialPair.priority = RouterIntentSettings.Priority.CRITICAL;
+    differentialPair.maxSkewMm = maxSkewMm;
+
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { differentialPair };
     return intent;
   }
 

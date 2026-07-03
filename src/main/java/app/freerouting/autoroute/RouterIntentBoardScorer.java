@@ -13,6 +13,7 @@ final class RouterIntentBoardScorer {
   private static final float INTENT_INCOMPLETE_PENALTY_POINTS = 25f;
   private static final float PROTECTED_VIA_PENALTY_POINTS = 20f;
   private static final float CRITICAL_PATH_EXCESS_LENGTH_PENALTY_POINTS_PER_MM = 10f;
+  private static final float DIFFERENTIAL_PAIR_SKEW_PENALTY_POINTS_PER_MM = 20f;
 
   private RouterIntentBoardScorer() {
   }
@@ -27,7 +28,8 @@ final class RouterIntentBoardScorer {
     }
     float intentPenalty = intentIncompletePenalty(board, intent)
         + protectedViaPenalty(board, intent)
-        + criticalPathExcessLengthPenalty(board, intent);
+        + criticalPathExcessLengthPenalty(board, intent)
+        + differentialPairSkewPenalty(board, intent);
     return Math.max(0f, baseScore - intentPenalty);
   }
 
@@ -109,8 +111,51 @@ final class RouterIntentBoardScorer {
       double excessMm = routedLengthMm - criticalPath.maxLengthMm;
       if (excessMm > 0) {
         penalty += excessMm
-            * criticalPathPriorityRank(criticalPath)
+            * priorityRank(criticalPath.priority)
             * CRITICAL_PATH_EXCESS_LENGTH_PENALTY_POINTS_PER_MM;
+      }
+    }
+    return penalty;
+  }
+
+  static float differentialPairSkewPenalty(RoutingBoard board, RouterIntentSettings intent) {
+    if (board == null
+        || board.rules == null
+        || intent == null
+        || intent.differentialPairs == null
+        || intent.differentialPairs.length == 0) {
+      return 0f;
+    }
+
+    double mmResolution = board.communication.get_resolution(Unit.MM);
+    if (mmResolution <= 0) {
+      return 0f;
+    }
+
+    float penalty = 0f;
+    for (RouterIntentSettings.DifferentialPairIntent differentialPair : intent.differentialPairs) {
+      if (differentialPair == null
+          || differentialPair.positiveNet == null
+          || differentialPair.negativeNet == null
+          || differentialPair.maxSkewMm == null
+          || differentialPair.maxSkewMm < 0) {
+        continue;
+      }
+
+      Net positiveNet = board.rules.nets.get(differentialPair.positiveNet, 1);
+      Net negativeNet = board.rules.nets.get(differentialPair.negativeNet, 1);
+      if (positiveNet == null || negativeNet == null) {
+        continue;
+      }
+
+      double positiveLengthMm = positiveNet.get_trace_length() / mmResolution;
+      double negativeLengthMm = negativeNet.get_trace_length() / mmResolution;
+      double skewMm = Math.abs(positiveLengthMm - negativeLengthMm);
+      double excessMm = skewMm - differentialPair.maxSkewMm;
+      if (excessMm > 0) {
+        penalty += excessMm
+            * priorityRank(differentialPair.priority)
+            * DIFFERENTIAL_PAIR_SKEW_PENALTY_POINTS_PER_MM;
       }
     }
     return penalty;
@@ -119,7 +164,8 @@ final class RouterIntentBoardScorer {
   private static boolean hasScoringIntent(RouterIntentSettings intent) {
     return intent != null
         && (intent.hasNetIntents()
-            || (intent.criticalPaths != null && intent.criticalPaths.length > 0));
+            || (intent.criticalPaths != null && intent.criticalPaths.length > 0)
+            || (intent.differentialPairs != null && intent.differentialPairs.length > 0));
   }
 
   private static int intentRank(RouterIntentSettings intent, String netName) {
@@ -128,11 +174,11 @@ final class RouterIntentBoardScorer {
         + intent.ripupProtectionRankForNet(netName);
   }
 
-  private static int criticalPathPriorityRank(RouterIntentSettings.CriticalPathIntent criticalPath) {
-    if (criticalPath.priority == null) {
+  private static int priorityRank(RouterIntentSettings.Priority priority) {
+    if (priority == null) {
       return 1;
     }
-    return switch (criticalPath.priority) {
+    return switch (priority) {
       case NORMAL -> 1;
       case HIGH -> 2;
       case CRITICAL -> 3;
