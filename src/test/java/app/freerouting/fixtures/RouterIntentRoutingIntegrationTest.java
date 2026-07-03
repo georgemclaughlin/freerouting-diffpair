@@ -17,6 +17,7 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
 
   private static final String FIXTURE = "Issue269-min_fr_test/min_fr_test.dsn";
   private static final String STEERED_NET = "Net-(J1-Pin_1)";
+  private static final String RIPUP_FIXTURE = "router-intent-ripup-cost.dsn";
 
   @Test
   void preferredLayerIntentChangesRoutedGeometry() {
@@ -64,20 +65,51 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
             + protectedLength);
   }
 
+  @Test
+  void protectedRipupCostIntentPreservesObstacleGeometry() {
+    RoutingJob baseline = routeWithIntent(RIPUP_FIXTURE, null, "CROSS", 1, 1);
+    RoutingJob protectedKeep = routeWithIntent(RIPUP_FIXTURE, protectedNetIntent("KEEP"), "CROSS", 0, 1);
+
+    assertEquals(1, incompleteCount(baseline, "KEEP"));
+    assertEquals(0, incompleteCount(protectedKeep, "KEEP"));
+    assertTrue(
+        routedLength(protectedKeep, "KEEP") > routedLength(baseline, "KEEP"),
+        "expected protected ripup intent to preserve the existing KEEP trace");
+    assertTrue(
+        routedLength(protectedKeep, "CROSS") > routedLength(baseline, "CROSS"),
+        "expected protected ripup intent to route CROSS around KEEP instead of ripping through it");
+  }
+
   private RoutingJob routeWithIntent(RouterIntentSettings intent) {
+    return routeWithIntent(FIXTURE, intent, STEERED_NET, 1);
+  }
+
+  private RoutingJob routeWithIntent(String fixture, RouterIntentSettings intent, String completeNetName, int maxIncomplete) {
+    return routeWithIntent(fixture, intent, completeNetName, maxIncomplete, null);
+  }
+
+  private RoutingJob routeWithIntent(
+      String fixture,
+      RouterIntentSettings intent,
+      String completeNetName,
+      int maxIncomplete,
+      Integer startRipupCosts) {
     TestingSettings settings = new TestingSettings();
     settings.setMaxPasses(20);
     settings.setJobTimeoutString("00:00:30");
     settings.setOptimizerEnabled(false);
 
-    RoutingJob job = GetRoutingJob(FIXTURE, settings);
+    RoutingJob job = GetRoutingJob(fixture, settings);
+    if (startRipupCosts != null) {
+      job.routerSettings.set_start_ripup_costs(startRipupCosts);
+    }
     job.routerSettings.intent = intent;
     RunRoutingJob(job);
-    assertRoutingResult(job, FIXTURE)
+    assertRoutingResult(job, fixture)
         .maxDuration(Duration.ofSeconds(30))
-        .maxIncompleteConnections(1)
+        .maxIncompleteConnections(maxIncomplete)
         .check();
-    assertEquals(0, incompleteCount(job, STEERED_NET));
+    assertEquals(0, incompleteCount(job, completeNetName));
     return job;
   }
 
