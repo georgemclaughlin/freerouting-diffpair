@@ -153,6 +153,33 @@ class RouterIntentRoutingPolicyTest {
   }
 
   @Test
+  void viaCostFactorPenalizesDifferentialPairMembers() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "USB_D_PLUS",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.NONE),
+        netIntent(
+            "USB_D_MINUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL),
+        netIntent(
+            "VBUS",
+            RouterIntentSettings.Priority.NORMAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.NONE));
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] {
+        differentialPair("usb2_data", "USB_D_PLUS", "USB_D_MINUS")
+    };
+
+    assertEquals(1.5, RouterIntentRoutingPolicy.viaCostFactor(intent, "USB_D_PLUS"));
+    assertEquals(2.25, RouterIntentRoutingPolicy.viaCostFactor(intent, "USB_D_MINUS"));
+    assertEquals(1.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "VBUS"));
+  }
+
+  @Test
   void ripupCostFactorProtectsHigherRankedCopperMoreStrongly() {
     RouterIntentSettings intent = intentWith(
         netIntent(

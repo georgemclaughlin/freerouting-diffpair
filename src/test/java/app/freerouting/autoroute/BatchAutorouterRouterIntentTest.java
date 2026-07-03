@@ -138,6 +138,30 @@ class BatchAutorouterRouterIntentTest {
     assertTrue(control.routerIntentPairCorridorPenalty(new FloatPoint(50_000, -50_000), 1) > 0.0);
   }
 
+  @Test
+  void differentialPairIntentRaisesViaCostBeforeMazeSearch() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(negative);
+
+    RouterSettings baselineSettings = routerSettings(board, null);
+    RouterSettings pairSettings = routerSettings(board, differentialPairIntent());
+    AutorouteControl baselineControl = new AutorouteControl(
+        board,
+        negative.net_number,
+        baselineSettings,
+        baselineSettings.get_via_costs(),
+        baselineSettings.get_trace_cost_arr());
+    AutorouteControl pairControl = new AutorouteControl(
+        board,
+        negative.net_number,
+        pairSettings,
+        pairSettings.get_via_costs(),
+        pairSettings.get_trace_cost_arr());
+
+    assertEquals(1.5, pairControl.min_normal_via_cost / baselineControl.min_normal_via_cost, 0.01);
+  }
+
   private void insertSiblingTrace(RoutingBoard board, Net net, int layer) {
     int halfWidth = board.rules.get_trace_half_width(net.net_number, layer);
     int clearanceClass = net.get_class().get_trace_clearance_class();
@@ -154,9 +178,13 @@ class BatchAutorouterRouterIntentTest {
   }
 
   private RouterSettings routerSettings(RoutingBoard board) {
+    return routerSettings(board, differentialPairIntent());
+  }
+
+  private RouterSettings routerSettings(RoutingBoard board, RouterIntentSettings intent) {
     RouterSettings settings = new RouterSettings(board);
     settings.automatic_neckdown = false;
-    settings.intent = differentialPairIntent();
+    settings.intent = intent;
     return settings;
   }
 

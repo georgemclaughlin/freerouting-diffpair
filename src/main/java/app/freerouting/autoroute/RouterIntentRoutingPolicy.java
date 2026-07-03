@@ -13,6 +13,7 @@ final class RouterIntentRoutingPolicy {
   private static final double LOCAL_SCOPE_EXIT_COST_FACTOR = 6.0;
   private static final double DIFFERENTIAL_PAIR_SIBLING_LAYER_COST_FACTOR = 3.0;
   private static final double DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR = 0.25;
+  private static final double DIFFERENTIAL_PAIR_EXTRA_VIA_COST_FACTOR = 1.5;
 
   private RouterIntentRoutingPolicy() {
   }
@@ -67,12 +68,13 @@ final class RouterIntentRoutingPolicy {
   }
 
   static double viaCostFactor(RouterIntentSettings intent, String netName) {
-    return switch (ripupProtectionRank(intent, netName)) {
+    double ripupFactor = switch (ripupProtectionRank(intent, netName)) {
       case 1 -> CRITICAL_NET_VIA_COST_FACTOR;
       case 2 -> LOCAL_SUPPORT_VIA_COST_FACTOR;
       case 3 -> SOURCE_COPPER_VIA_COST_FACTOR;
       default -> 1.0;
     };
+    return ripupFactor * differentialPairViaCostFactor(intent, netName);
   }
 
   static double ripupCostFactor(RouterIntentSettings intent, String netName) {
@@ -92,6 +94,12 @@ final class RouterIntentRoutingPolicy {
     return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
         ? DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR
         : 0.0;
+  }
+
+  private static double differentialPairViaCostFactor(RouterIntentSettings intent, String netName) {
+    return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
+        ? DIFFERENTIAL_PAIR_EXTRA_VIA_COST_FACTOR
+        : 1.0;
   }
 
   private static int priorityRank(RouterIntentSettings intent, String netName) {
