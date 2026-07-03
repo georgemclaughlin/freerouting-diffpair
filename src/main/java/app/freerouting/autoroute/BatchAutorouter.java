@@ -353,7 +353,7 @@ public class BatchAutorouter extends NamedAlgorithm {
       boolean useSlowAlgorithm = false;
 
       BatchAutorouterThread[] autorouterThreads = new BatchAutorouterThread[job.routerSettings.maxThreads];
-      BoardHistory bh = new BoardHistory(job.routerSettings.scoring);
+      BoardHistory bh = new BoardHistory(job.routerSettings.scoring, job.routerSettings.intent);
 
       // Start multiple instances of the following part in parallel, wait for the
       // results and keep only the best one
@@ -414,7 +414,7 @@ public class BatchAutorouter extends NamedAlgorithm {
         BoardStatistics clonedBoardStatistics = autorouterThread
             .getBoard()
             .get_statistics();
-        float clonedBoardScore = clonedBoardStatistics.getNormalizedScore(job.routerSettings.scoring);
+        float clonedBoardScore = normalizedBoardScore(autorouterThread.getBoard());
 
         job.logDebug("Router thread #" + p_pass_no + "." + ThreadIndexToLetter(threadIndex) + " finished with score: "
             + FRLogger.formatScore(clonedBoardScore,
@@ -431,8 +431,7 @@ public class BatchAutorouter extends NamedAlgorithm {
 
       // Find the best thread
       for (int i = 0; i < job.routerSettings.maxThreads; i++) {
-        BoardStatistics stats = autorouterThreads[i].getBoard().get_statistics();
-        float score = stats.getNormalizedScore(job.routerSettings.scoring);
+        float score = normalizedBoardScore(autorouterThreads[i].getBoard());
         if (score > bestScore) {
           bestScore = score;
           bestThread = autorouterThreads[i];
@@ -809,7 +808,7 @@ public class BatchAutorouter extends NamedAlgorithm {
     this.initialUnroutedCount = calculateIncompleteCount(this.board);
 
     boolean continueAutorouting = true;
-    BoardHistory bh = new BoardHistory(job.routerSettings.scoring);
+    BoardHistory bh = new BoardHistory(job.routerSettings.scoring, job.routerSettings.intent);
 
     // Record configuration for profiler
     if (this.settings.getLayerCount() > 0) {
@@ -964,7 +963,6 @@ public class BatchAutorouter extends NamedAlgorithm {
       this.fireTaskStateChangedEvent(
           new TaskStateChangedEvent(this, TaskState.RUNNING, currentPass, currentBoardHash));
 
-      float boardScoreBefore = new BoardStatistics(this.board).getNormalizedScore(job.routerSettings.scoring);
       bh.add(this.board);
 
       FRLogger.traceEntry("BatchAutorouter.autoroute_pass #" + currentPass + " on board '" + currentBoardHash + "'");
@@ -972,7 +970,7 @@ public class BatchAutorouter extends NamedAlgorithm {
       continueAutorouting = autoroute_pass(currentPass);
 
       BoardStatistics boardStatisticsAfter = new BoardStatistics(this.board);
-      float boardScoreAfter = boardStatisticsAfter.getNormalizedScore(job.routerSettings.scoring);
+      float boardScoreAfter = normalizedBoardScore(this.board);
 
       if ((bh.size() >= STOP_AT_PASS_MINIMUM) || (this.thread.is_stop_auto_router_requested())) {
         if (((currentPass % STOP_AT_PASS_MODULO == 0) && (currentPass >= STOP_AT_PASS_MINIMUM))
@@ -1002,7 +1000,7 @@ public class BatchAutorouter extends NamedAlgorithm {
             // Reset pass-local stagnation counter when restoring a previous board state
             consecutiveNoImprovementPasses = 0;
             boardStatisticsAfter = boardStatistics;
-            boardScoreAfter = boardStatisticsAfter.getNormalizedScore(job.routerSettings.scoring);
+            boardScoreAfter = normalizedBoardScore(this.board);
             lastBestScore = boardScoreAfter;
             currentBoardHash = this.board.get_hash();
             // Reset the same-hash set after a board restore: the restored board will be
@@ -1095,7 +1093,7 @@ public class BatchAutorouter extends NamedAlgorithm {
             int incompletesBeforeRecovery = boardStatisticsAfter.connections.incompleteCount;
             remove_tails(Item.StopConnectionOption.NONE);
             boardStatisticsAfter = new BoardStatistics(this.board);
-            boardScoreAfter = boardStatisticsAfter.getNormalizedScore(job.routerSettings.scoring);
+            boardScoreAfter = normalizedBoardScore(this.board);
             lastBestScore = boardScoreAfter;
             consecutiveNoImprovementPasses = 0;
             fanoutRecoveryApplied = true;
@@ -1162,7 +1160,7 @@ public class BatchAutorouter extends NamedAlgorithm {
     // Ensure we finish with the best board ever seen during this routing session.
     // When stagnation or the max-pass limit fires, the loop exits with the board from the last
     // completed pass, which may be worse than an earlier pass that was recorded in the history.
-    float currentFinalScore = new BoardStatistics(this.board).getNormalizedScore(job.routerSettings.scoring);
+    float currentFinalScore = normalizedBoardScore(this.board);
     float bestHistoryScore = bh.getMaxScore();
     if (bestHistoryScore > currentFinalScore) {
       RoutingBoard bestBoard = bh.restoreBestBoard();
@@ -1175,7 +1173,7 @@ public class BatchAutorouter extends NamedAlgorithm {
                 currentStats.connections.incompleteCount,
                 currentStats.clearanceViolations.totalCount)
             + ") is worse than the best board seen during routing (score "
-            + FRLogger.formatScore(bestStats.getNormalizedScore(job.routerSettings.scoring),
+            + FRLogger.formatScore(normalizedBoardScore(this.board),
                 bestStats.connections.incompleteCount,
                 bestStats.clearanceViolations.totalCount)
             + "). Restoring the best board as the final result.");
@@ -1682,5 +1680,12 @@ public class BatchAutorouter extends NamedAlgorithm {
     DesignRulesChecker tempDrc = new DesignRulesChecker(board, null);
     tempDrc.calculateAllIncompletes();
     return tempDrc.getIncompleteCount();
+  }
+
+  private float normalizedBoardScore(RoutingBoard board) {
+    return RouterIntentBoardScorer.normalizedScore(
+        board,
+        job.routerSettings.scoring,
+        job.routerSettings.intent);
   }
 }

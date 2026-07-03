@@ -2,7 +2,7 @@ package app.freerouting.autoroute;
 
 import app.freerouting.board.BasicBoard;
 import app.freerouting.board.RoutingBoard;
-import app.freerouting.core.scoring.BoardStatistics;
+import app.freerouting.settings.RouterIntentSettings;
 import app.freerouting.settings.RouterScoringSettings;
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -31,17 +31,27 @@ public class BoardHistory {
   private final int maxHistorySize;
   private final List<BoardHistoryEntry> boards = Collections.synchronizedList(new ArrayList<>());
   private final RouterScoringSettings scoringSettings;
+  private final RouterIntentSettings intent;
   private final ReadWriteLock rwLock = new ReentrantReadWriteLock();
 
   public BoardHistory(RouterScoringSettings scoringSettings) {
-    this(scoringSettings, MAX_HISTORY_SIZE);
+    this(scoringSettings, null, MAX_HISTORY_SIZE);
+  }
+
+  public BoardHistory(RouterScoringSettings scoringSettings, RouterIntentSettings intent) {
+    this(scoringSettings, intent, MAX_HISTORY_SIZE);
   }
 
   /**
    * Package-private constructor that allows a custom cap. Intended for unit tests only.
    */
   BoardHistory(RouterScoringSettings scoringSettings, int maxHistorySize) {
+    this(scoringSettings, null, maxHistorySize);
+  }
+
+  BoardHistory(RouterScoringSettings scoringSettings, RouterIntentSettings intent, int maxHistorySize) {
     this.scoringSettings = scoringSettings;
+    this.intent = intent;
     this.maxHistorySize = maxHistorySize;
   }
 
@@ -53,7 +63,7 @@ public class BoardHistory {
     if (boards.size() >= maxHistorySize) {
       // Compute the new board's score before the expensive serialisation so we can
       // skip adding boards that would not improve the history.
-      float newScore = new BoardStatistics(board).getNormalizedScore(scoringSettings);
+      float newScore = RouterIntentBoardScorer.normalizedScore(board, scoringSettings, intent);
 
       // Find the worst-scoring entry via a linear scan (O(n), n ≤ MAX_HISTORY_SIZE).
       // Thread safety: this method is `synchronized`, so no other thread can modify
@@ -76,7 +86,7 @@ public class BoardHistory {
       boards.remove(worstIndex);
     }
 
-    boards.add(new BoardHistoryEntry(board, scoringSettings));
+    boards.add(new BoardHistoryEntry(board, scoringSettings, intent));
   }
 
   public synchronized void clear() {
@@ -204,10 +214,13 @@ public class BoardHistory {
     public final float score;
     public int restoreCount;
 
-    public BoardHistoryEntry(RoutingBoard board, RouterScoringSettings scoringSettings) {
+    public BoardHistoryEntry(
+        RoutingBoard board,
+        RouterScoringSettings scoringSettings,
+        RouterIntentSettings intent) {
       this.board = board.serialize(false);
       this.hash = board.get_hash();
-      this.score = new BoardStatistics(board).getNormalizedScore(scoringSettings);
+      this.score = RouterIntentBoardScorer.normalizedScore(board, scoringSettings, intent);
       this.restoreCount = 0;
     }
   }
