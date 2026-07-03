@@ -28,6 +28,7 @@ import app.freerouting.geometry.planar.FloatPoint;
 import app.freerouting.geometry.planar.Point;
 import app.freerouting.logger.FRLogger;
 import app.freerouting.rules.Net;
+import app.freerouting.settings.RouterIntentSettings;
 import app.freerouting.settings.RouterSettings;
 import com.sun.management.ThreadMXBean;
 import java.lang.management.ManagementFactory;
@@ -296,7 +297,40 @@ public class BatchAutorouter extends NamedAlgorithm {
         }
       }
     }
+    applyRouterIntentOrder(autoroute_item_list);
     return autoroute_item_list;
+  }
+
+  private void applyRouterIntentOrder(List<Item> autorouteItems) {
+    RouterIntentSettings intent = this.settings.intent;
+    if (intent == null || !intent.hasNetIntents() || autorouteItems.size() < 2) {
+      return;
+    }
+    autorouteItems.sort(this::compareRouterIntentItems);
+  }
+
+  private int compareRouterIntentItems(Item left, Item right) {
+    return RouterIntentRoutingPolicy.compareNetNames(
+        this.settings.intent,
+        routerIntentPrimaryNetName(left),
+        routerIntentPrimaryNetName(right));
+  }
+
+  private String routerIntentPrimaryNetName(Item item) {
+    String bestNetName = null;
+    for (int i = 0; i < item.net_count(); i++) {
+      String candidateName = netName(item.get_net_no(i));
+      if (bestNetName == null
+          || RouterIntentRoutingPolicy.compareNetNames(this.settings.intent, candidateName, bestNetName) < 0) {
+        bestNetName = candidateName;
+      }
+    }
+    return bestNetName;
+  }
+
+  private String netName(int netNo) {
+    Net net = this.board.rules.nets.get(netNo);
+    return net != null ? net.name : null;
   }
 
   /**
@@ -1264,7 +1298,7 @@ public class BatchAutorouter extends NamedAlgorithm {
       // Get and calculate the auto-router settings based on the board and net we are
       // working on
       AutorouteControl autoroute_control = new AutorouteControl(this.board, p_route_net_no, settings, curr_via_costs,
-          this.trace_cost_arr);
+          traceCostsForRouterIntent(p_route_net_no));
       autoroute_control.ripup_allowed = true;
       autoroute_control.ripup_costs = this.start_ripup_costs * p_ripup_pass_no;
       autoroute_control.remove_unconnected_vias = this.remove_unconnected_vias;
@@ -1614,6 +1648,34 @@ public class BatchAutorouter extends NamedAlgorithm {
       return new FloatPoint((first.x + last.x) / 2, (first.y + last.y) / 2);
     }
     return null;
+  }
+
+  private AutorouteControl.ExpansionCostFactor[] traceCostsForRouterIntent(int routeNetNo) {
+    RouterIntentSettings intent = this.settings.intent;
+    String routeNetName = netName(routeNetNo);
+    if (intent == null || !intent.hasPreferredLayerIntent(routeNetName)) {
+      return this.trace_cost_arr;
+    }
+
+    AutorouteControl.ExpansionCostFactor[] result = new AutorouteControl.ExpansionCostFactor[this.trace_cost_arr.length];
+    for (int layer = 0; layer < this.trace_cost_arr.length; layer++) {
+      result[layer] = RouterIntentRoutingPolicy.traceCostForLayer(
+          intent,
+          routeNetName,
+          boardLayerName(layer),
+          this.trace_cost_arr[layer]);
+    }
+    return result;
+  }
+
+  private String boardLayerName(int layer) {
+    if (this.board == null
+        || this.board.layer_structure == null
+        || layer < 0
+        || layer >= this.board.layer_structure.arr.length) {
+      return "layer#" + layer;
+    }
+    return this.board.layer_structure.arr[layer].name;
   }
 
   private int calculateIncompleteCount(RoutingBoard board) {

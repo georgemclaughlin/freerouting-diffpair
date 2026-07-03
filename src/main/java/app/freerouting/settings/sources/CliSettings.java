@@ -1,9 +1,11 @@
 package app.freerouting.settings.sources;
 
 import app.freerouting.logger.FRLogger;
+import app.freerouting.settings.RouterIntentSettings;
 import app.freerouting.util.ReflectionUtil;
 import app.freerouting.settings.RouterSettings;
 import app.freerouting.settings.SettingsSource;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -90,6 +92,13 @@ public class CliSettings implements SettingsSource {
             String fieldPath = propertyName.startsWith("router.")
                     ? propertyName.substring(7)
                     : propertyName;
+
+            if ("intent_file".equals(fieldPath)) {
+                settings.intent = RouterIntentSettings.load(Path.of(value));
+                parsedArguments.put(propertyName, value);
+                FRLogger.info("Applied CLI router intent payload: " + value);
+                return;
+            }
 
             ReflectionUtil.setFieldValue(settings, fieldPath, value);
             parsedArguments.put(propertyName, value);

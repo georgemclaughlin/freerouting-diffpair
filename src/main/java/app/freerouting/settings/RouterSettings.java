@@ -54,6 +54,8 @@ public class RouterSettings implements Serializable, Cloneable {
   public RouterScoringSettings scoring;
   @SerializedName("max_threads")
   public Integer maxThreads;
+  @SerializedName("intent")
+  public transient RouterIntentSettings intent;
   // PropertyChangeSupport for bidirectional binding with GUI
   private transient PropertyChangeSupport pcs = new PropertyChangeSupport(this);
 
@@ -396,6 +398,7 @@ public class RouterSettings implements Serializable, Cloneable {
     result.vias_allowed = this.vias_allowed;
     result.automatic_neckdown = this.automatic_neckdown;
     result.maxThreads = this.maxThreads;
+    result.intent = this.intent != null ? this.intent.clone() : null;
 
     // Use proper clone() methods for nested objects
     result.optimizer = this.optimizer != null ? this.optimizer.clone() : new RouterOptimizerSettings();

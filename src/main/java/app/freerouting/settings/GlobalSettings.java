@@ -468,6 +468,9 @@ public class GlobalSettings implements Serializable {
                 }
               }
             } else {
+              if (parts[0].equals("router.intent_file")) {
+                continue;
+              }
               setValue(parts[0], parts[1]);
             }
           } else if (!Objects.equals(parts[0], "user_data_path")) {
@@ -726,4 +729,3 @@ public class GlobalSettings implements Serializable {
     return routerSettings.optimizer.itemSelectionStrategy;
   }
 }
-
