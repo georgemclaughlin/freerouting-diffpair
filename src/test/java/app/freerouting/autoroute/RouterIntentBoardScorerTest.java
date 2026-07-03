@@ -18,9 +18,11 @@ import org.junit.jupiter.api.Test;
 class RouterIntentBoardScorerTest extends RoutingFixtureTest {
   private static final String VIA_FIXTURE = "Issue269-min_fr_test/min_fr_test.dsn";
   private static final String RIPUP_FIXTURE = "router-intent-ripup-cost.dsn";
+  private static final String LOCAL_SCOPE_FIXTURE = "router-intent-local-scope.dsn";
   private static final String STEERED_NET = "Net-(J1-Pin_1)";
   private static final String KEEP_NET = "KEEP";
   private static final String CROSS_NET = "CROSS";
+  private static final String LOCAL_NET = "LOCAL";
 
   @Test
   void penalizesIncompleteIntentNetsWithoutChangingGenericScore() {
@@ -105,6 +107,23 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
     assertEquals(Math.max(0f, genericScore - skewPenalty), intentScore, 0.001f);
   }
 
+  @Test
+  void penalizesLocalScopeTraceExcursion() {
+    RoutingJob routed = routedLocalScopeFixture();
+    RouterIntentSettings strictLocalIntent = localScopeIntent(LOCAL_NET, 0.1, "L1.1");
+
+    float genericScore = new BoardStatistics(routed.board).getNormalizedScore(routed.routerSettings.scoring);
+    float localPenalty = RouterIntentBoardScorer.localScopeExcursionPenalty(routed.board, strictLocalIntent);
+    float intentScore = RouterIntentBoardScorer.normalizedScore(
+        routed.board,
+        routed.routerSettings.scoring,
+        strictLocalIntent);
+
+    assertEquals(0, incompleteCount(routed, LOCAL_NET));
+    assertTrue(localPenalty > 0f, "strict one-pad local region should penalize routed excursion");
+    assertEquals(Math.max(0f, genericScore - localPenalty), intentScore, 0.001f);
+  }
+
   private RoutingJob routedRipupFixture() {
     TestingSettings settings = new TestingSettings();
     settings.setMaxPasses(20);
@@ -155,6 +174,22 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
     return job;
   }
 
+  private RoutingJob routedLocalScopeFixture() {
+    TestingSettings settings = new TestingSettings();
+    settings.setMaxPasses(20);
+    settings.setJobTimeoutString("00:00:30");
+    settings.setOptimizerEnabled(false);
+
+    RoutingJob job = GetRoutingJob(LOCAL_SCOPE_FIXTURE, settings);
+    job.routerSettings.intent = localScopeIntent(LOCAL_NET, 5.0, "L1.1", "L2.1");
+    RunRoutingJob(job);
+    assertRoutingResult(job, LOCAL_SCOPE_FIXTURE)
+        .maxDuration(Duration.ofSeconds(30))
+        .maxIncompleteConnections(0)
+        .check();
+    return job;
+  }
+
   private RouterIntentSettings protectedNetIntent(String netName) {
     RouterIntentSettings.NetIntent netIntent = new RouterIntentSettings.NetIntent();
     netIntent.net = netName;
@@ -189,6 +224,27 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
 
     RouterIntentSettings intent = new RouterIntentSettings();
     intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { differentialPair };
+    return intent;
+  }
+
+  private RouterIntentSettings localScopeIntent(String netName, double maxDistanceMm, String... padRefs) {
+    RouterIntentSettings.NetIntent netIntent = new RouterIntentSettings.NetIntent();
+    netIntent.net = netName;
+    netIntent.priority = RouterIntentSettings.Priority.NORMAL;
+    netIntent.scope = RouterIntentSettings.Scope.LOCAL;
+    netIntent.ripupProtection = RouterIntentSettings.RipupProtection.NONE;
+
+    RouterIntentSettings.LocalSupportIntent localSupport = new RouterIntentSettings.LocalSupportIntent();
+    localSupport.id = "local_scope_scoring_test";
+    localSupport.kind = RouterIntentSettings.LocalSupportKind.SAME_NET_PAD_TIE;
+    localSupport.nets = new String[] { netName };
+    localSupport.padRefs = padRefs;
+    localSupport.priority = RouterIntentSettings.Priority.NORMAL;
+    localSupport.maxDistanceMm = maxDistanceMm;
+
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.netIntents = new RouterIntentSettings.NetIntent[] { netIntent };
+    intent.localSupport = new RouterIntentSettings.LocalSupportIntent[] { localSupport };
     return intent;
   }
 

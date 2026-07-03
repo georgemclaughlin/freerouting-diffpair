@@ -1,10 +1,14 @@
 package app.freerouting.autoroute;
 
 import app.freerouting.board.RoutingBoard;
+import app.freerouting.board.PolylineTrace;
+import app.freerouting.board.Trace;
 import app.freerouting.board.Unit;
 import app.freerouting.board.Via;
 import app.freerouting.core.scoring.BoardStatistics;
 import app.freerouting.drc.DesignRulesChecker;
+import app.freerouting.geometry.planar.FloatPoint;
+import app.freerouting.geometry.planar.IntBox;
 import app.freerouting.rules.Net;
 import app.freerouting.settings.RouterIntentSettings;
 import app.freerouting.settings.RouterScoringSettings;
@@ -14,6 +18,7 @@ final class RouterIntentBoardScorer {
   private static final float PROTECTED_VIA_PENALTY_POINTS = 20f;
   private static final float CRITICAL_PATH_EXCESS_LENGTH_PENALTY_POINTS_PER_MM = 10f;
   private static final float DIFFERENTIAL_PAIR_SKEW_PENALTY_POINTS_PER_MM = 20f;
+  private static final float LOCAL_SCOPE_EXCURSION_PENALTY_POINTS_PER_MM = 5f;
 
   private RouterIntentBoardScorer() {
   }
@@ -29,7 +34,8 @@ final class RouterIntentBoardScorer {
     float intentPenalty = intentIncompletePenalty(board, intent)
         + protectedViaPenalty(board, intent)
         + criticalPathExcessLengthPenalty(board, intent)
-        + differentialPairSkewPenalty(board, intent);
+        + differentialPairSkewPenalty(board, intent)
+        + localScopeExcursionPenalty(board, intent);
     return Math.max(0f, baseScore - intentPenalty);
   }
 
@@ -156,6 +162,50 @@ final class RouterIntentBoardScorer {
         penalty += excessMm
             * priorityRank(differentialPair.priority)
             * DIFFERENTIAL_PAIR_SKEW_PENALTY_POINTS_PER_MM;
+      }
+    }
+    return penalty;
+  }
+
+  static float localScopeExcursionPenalty(RoutingBoard board, RouterIntentSettings intent) {
+    if (board == null || board.rules == null || intent == null || !intent.hasNetIntents()) {
+      return 0f;
+    }
+
+    double mmResolution = board.communication.get_resolution(Unit.MM);
+    if (mmResolution <= 0) {
+      return 0f;
+    }
+
+    float penalty = 0f;
+    for (int netNo = 1; netNo <= board.rules.nets.max_net_no(); netNo++) {
+      Net net = board.rules.nets.get(netNo);
+      if (net == null || net.name == null || !intent.hasLocalScopeIntent(net.name)) {
+        continue;
+      }
+
+      IntBox localRegion = RouterIntentLocalScope.localRegion(board, intent, net);
+      if (localRegion == null) {
+        continue;
+      }
+
+      double excursionMm = 0.0;
+      for (Trace trace : board.get_traces()) {
+        if (!trace.contains_net(netNo)) {
+          continue;
+        }
+        FloatPoint[] points = trace instanceof PolylineTrace polylineTrace
+            ? polylineTrace.polyline().corner_approx_arr()
+            : new FloatPoint[] { trace.first_corner().to_float(), trace.last_corner().to_float() };
+        for (FloatPoint point : points) {
+          excursionMm += RouterIntentLocalScope.distanceOutside(localRegion, point) / mmResolution;
+        }
+      }
+
+      if (excursionMm > 0) {
+        penalty += excursionMm
+            * intentRank(intent, net.name)
+            * LOCAL_SCOPE_EXCURSION_PENALTY_POINTS_PER_MM;
       }
     }
     return penalty;

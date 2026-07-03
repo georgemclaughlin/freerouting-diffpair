@@ -1,10 +1,8 @@
 package app.freerouting.autoroute;
 
-import app.freerouting.board.Component;
 import app.freerouting.board.Item;
 import app.freerouting.board.Pin;
 import app.freerouting.board.RoutingBoard;
-import app.freerouting.board.Unit;
 import app.freerouting.core.Padstack;
 import app.freerouting.geometry.planar.ConvexShape;
 import app.freerouting.geometry.planar.FloatPoint;
@@ -14,7 +12,6 @@ import app.freerouting.rules.Net;
 import app.freerouting.rules.NetClass;
 import app.freerouting.rules.ViaInfo;
 import app.freerouting.rules.ViaRule;
-import app.freerouting.settings.RouterIntentSettings;
 import app.freerouting.settings.RouterSettings;
 
 import java.util.Collection;
@@ -203,7 +200,7 @@ public class AutorouteControl {
     net_no = p_net_no;
     Net curr_net = p_board.rules.nets.get(p_net_no);
     router_intent_net_name = curr_net == null ? null : curr_net.name;
-    router_intent_local_region = routerIntentLocalRegion(p_board, curr_net);
+    router_intent_local_region = RouterIntentLocalScope.localRegion(p_board, this.settings.intent, curr_net);
     NetClass curr_net_class;
     if (curr_net != null) {
       curr_net_class = curr_net.get_class();
@@ -284,7 +281,7 @@ public class AutorouteControl {
     }
 
     double factor = RouterIntentRoutingPolicy.localScopeExitCostFactor(this.settings.intent, router_intent_net_name);
-    if (factor <= 0.0 || pointInside(router_intent_local_region, p_point)) {
+    if (factor <= 0.0 || RouterIntentLocalScope.pointInside(router_intent_local_region, p_point)) {
       return 0.0;
     }
 
@@ -292,96 +289,6 @@ public class AutorouteControl {
     double distance = p_point.distance(nearestPoint);
     double averageTraceCost = (trace_costs[p_layer].horizontal + trace_costs[p_layer].vertical) / 2.0;
     return distance * averageTraceCost * factor;
-  }
-
-  private IntBox routerIntentLocalRegion(RoutingBoard p_board, Net p_net) {
-    RouterIntentSettings intent = this.settings.intent;
-    if (intent == null || p_net == null || !intent.hasLocalScopeIntent(p_net.name)) {
-      return null;
-    }
-
-    RouterIntentSettings.LocalSupportIntent[] supports = intent.localSupportForNet(p_net.name);
-    if (supports.length == 0) {
-      return null;
-    }
-
-    int minX = Integer.MAX_VALUE;
-    int minY = Integer.MAX_VALUE;
-    int maxX = Integer.MIN_VALUE;
-    int maxY = Integer.MIN_VALUE;
-    int padCount = 0;
-    double maxDistanceMm = 0.0;
-    for (RouterIntentSettings.LocalSupportIntent support : supports) {
-      if (support.maxDistanceMm != null) {
-        maxDistanceMm = Math.max(maxDistanceMm, support.maxDistanceMm);
-      }
-      if (support.maxReturnDistanceMm != null) {
-        maxDistanceMm = Math.max(maxDistanceMm, support.maxReturnDistanceMm);
-      }
-      if (support.padRefs == null) {
-        continue;
-      }
-      for (String padRef : support.padRefs) {
-        Pin pin = findPinByPadRef(p_board, padRef);
-        if (pin == null) {
-          continue;
-        }
-        FloatPoint center = pin.get_center().to_float();
-        minX = Math.min(minX, (int) Math.floor(center.x));
-        minY = Math.min(minY, (int) Math.floor(center.y));
-        maxX = Math.max(maxX, (int) Math.ceil(center.x));
-        maxY = Math.max(maxY, (int) Math.ceil(center.y));
-        padCount++;
-      }
-    }
-
-    if (padCount == 0 || maxDistanceMm <= 0.0) {
-      return null;
-    }
-
-    int margin = Math.max(1, (int) Math.ceil(maxDistanceMm * p_board.communication.get_resolution(Unit.MM)));
-    return new IntBox(minX - margin, minY - margin, maxX + margin, maxY + margin);
-  }
-
-  private static Pin findPinByPadRef(RoutingBoard p_board, String p_pad_ref) {
-    PadRef padRef = PadRef.parse(p_pad_ref);
-    if (padRef == null) {
-      return null;
-    }
-
-    Component component = p_board.components.get(padRef.ref());
-    if (component == null) {
-      return null;
-    }
-    for (Pin pin : p_board.get_component_pins(component.no)) {
-      if (padRef.pad().equals(pin.name())) {
-        return pin;
-      }
-    }
-    return null;
-  }
-
-  private static boolean pointInside(IntBox p_box, FloatPoint p_point) {
-    return p_point.x >= p_box.ll.x
-        && p_point.x <= p_box.ur.x
-        && p_point.y >= p_box.ll.y
-        && p_point.y <= p_box.ur.y;
-  }
-
-  private record PadRef(String ref, String pad) {
-    static PadRef parse(String value) {
-      if (value == null || value.isBlank()) {
-        return null;
-      }
-      int separator = value.lastIndexOf('.');
-      if (separator < 0) {
-        separator = value.lastIndexOf('-');
-      }
-      if (separator <= 0 || separator >= value.length() - 1) {
-        return null;
-      }
-      return new PadRef(value.substring(0, separator), value.substring(separator + 1));
-    }
   }
 
   private static boolean isPureSmdNet(RoutingBoard p_board, int p_net_no) {
