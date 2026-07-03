@@ -12,6 +12,7 @@ final class RouterIntentRoutingPolicy {
   private static final double SOURCE_COPPER_RIPUP_COST_FACTOR = 8.0;
   private static final double LOCAL_SCOPE_EXIT_COST_FACTOR = 6.0;
   private static final double DIFFERENTIAL_PAIR_SIBLING_LAYER_COST_FACTOR = 3.0;
+  private static final double DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR = 0.25;
 
   private RouterIntentRoutingPolicy() {
   }
@@ -85,6 +86,12 @@ final class RouterIntentRoutingPolicy {
 
   static double localScopeExitCostFactor(RouterIntentSettings intent, String netName) {
     return intent != null && intent.hasLocalConfinementIntent(netName) ? LOCAL_SCOPE_EXIT_COST_FACTOR : 0.0;
+  }
+
+  static double differentialPairCorridorExitCostFactor(RouterIntentSettings intent, String netName) {
+    return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
+        ? DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR
+        : 0.0;
   }
 
   private static int priorityRank(RouterIntentSettings intent, String netName) {

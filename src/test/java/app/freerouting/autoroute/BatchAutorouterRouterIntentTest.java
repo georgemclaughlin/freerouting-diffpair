@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import app.freerouting.Freerouting;
 import app.freerouting.board.FixedState;
 import app.freerouting.board.RoutingBoard;
+import app.freerouting.geometry.planar.FloatPoint;
+import app.freerouting.geometry.planar.IntBox;
 import app.freerouting.geometry.planar.IntPoint;
 import app.freerouting.geometry.planar.Point;
 import app.freerouting.io.BoardReadResult;
@@ -84,8 +86,7 @@ class BatchAutorouterRouterIntentTest {
     assertNotNull(negative);
     insertSiblingTrace(board, positive, 1);
 
-    RouterSettings settings = new RouterSettings(board);
-    settings.intent = differentialPairIntent();
+    RouterSettings settings = routerSettings(board);
     BatchAutorouter router = new BatchAutorouter(
         null,
         board,
@@ -104,6 +105,39 @@ class BatchAutorouterRouterIntentTest {
     assertEquals(3.0, costs[0].vertical / costs[1].vertical, 0.01);
   }
 
+  @Test
+  void pairCorridorPenaltyIncreasesWithDistanceFromAlreadyRoutedSibling() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net positive = board.rules.nets.get(USB_D_PLUS, 1);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(positive);
+    assertNotNull(negative);
+    insertSiblingTrace(board, positive, 1);
+
+    RouterSettings settings = routerSettings(board);
+    BatchAutorouter router = new BatchAutorouter(
+        null,
+        board,
+        settings,
+        true,
+        false,
+        settings.get_start_ripup_costs(),
+        500);
+
+    IntBox[] corridors = router.routedDifferentialPairSiblingCorridors(settings.intent, USB_D_MINUS);
+    AutorouteControl control = new AutorouteControl(
+        board,
+        negative.net_number,
+        settings,
+        settings.get_via_costs(),
+        router.traceCostsForRouterIntent(negative.net_number));
+    control.setRouterIntentPairCorridors(corridors);
+
+    assertEquals(1, corridors.length);
+    assertEquals(0.0, control.routerIntentPairCorridorPenalty(new FloatPoint(50_000, -20_000), 1));
+    assertTrue(control.routerIntentPairCorridorPenalty(new FloatPoint(50_000, -50_000), 1) > 0.0);
+  }
+
   private void insertSiblingTrace(RoutingBoard board, Net net, int layer) {
     int halfWidth = board.rules.get_trace_half_width(net.net_number, layer);
     int clearanceClass = net.get_class().get_trace_clearance_class();
@@ -117,6 +151,13 @@ class BatchAutorouterRouterIntentTest {
         new int[] { net.net_number },
         clearanceClass,
         FixedState.UNFIXED);
+  }
+
+  private RouterSettings routerSettings(RoutingBoard board) {
+    RouterSettings settings = new RouterSettings(board);
+    settings.automatic_neckdown = false;
+    settings.intent = differentialPairIntent();
+    return settings;
   }
 
   private RouterIntentSettings differentialPairIntent() {

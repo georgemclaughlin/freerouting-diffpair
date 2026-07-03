@@ -129,6 +129,7 @@ public class AutorouteControl {
    */
   double min_cheap_via_cost;
   IntBox router_intent_local_region;
+  IntBox[] router_intent_pair_corridors;
   String router_intent_net_name;
  
   /**
@@ -193,6 +194,7 @@ public class AutorouteControl {
     ripup_costs = 1000;
     ripup_pass_no = 1;
     router_intent_local_region = null;
+    router_intent_pair_corridors = new IntBox[0];
     router_intent_net_name = null;
   }
 
@@ -289,6 +291,41 @@ public class AutorouteControl {
     double distance = p_point.distance(nearestPoint);
     double averageTraceCost = (trace_costs[p_layer].horizontal + trace_costs[p_layer].vertical) / 2.0;
     return distance * averageTraceCost * factor;
+  }
+
+  void setRouterIntentPairCorridors(IntBox[] p_corridors) {
+    router_intent_pair_corridors = p_corridors != null ? p_corridors : new IntBox[0];
+  }
+
+  double routerIntentPairCorridorPenalty(FloatPoint p_point, int p_layer) {
+    if (p_point == null
+        || router_intent_pair_corridors == null
+        || router_intent_pair_corridors.length == 0
+        || p_layer < 0
+        || p_layer >= trace_costs.length) {
+      return 0.0;
+    }
+
+    double factor = RouterIntentRoutingPolicy.differentialPairCorridorExitCostFactor(
+        this.settings.intent,
+        router_intent_net_name);
+    if (factor <= 0.0) {
+      return 0.0;
+    }
+
+    double nearestDistance = Double.MAX_VALUE;
+    for (IntBox corridor : router_intent_pair_corridors) {
+      if (corridor == null || corridor.is_empty()) {
+        continue;
+      }
+      nearestDistance = Math.min(nearestDistance, corridor.distance(p_point));
+    }
+    if (nearestDistance == Double.MAX_VALUE || nearestDistance <= 0.0) {
+      return 0.0;
+    }
+
+    double averageTraceCost = (trace_costs[p_layer].horizontal + trace_costs[p_layer].vertical) / 2.0;
+    return nearestDistance * averageTraceCost * factor;
   }
 
   private static boolean isPureSmdNet(RoutingBoard p_board, int p_net_no) {

@@ -25,6 +25,7 @@ import app.freerouting.drc.AirLine;
 import app.freerouting.drc.DesignRulesChecker;
 import app.freerouting.geometry.planar.FloatLine;
 import app.freerouting.geometry.planar.FloatPoint;
+import app.freerouting.geometry.planar.IntBox;
 import app.freerouting.geometry.planar.Point;
 import app.freerouting.logger.FRLogger;
 import app.freerouting.rules.Net;
@@ -69,6 +70,7 @@ public class BatchAutorouter extends NamedAlgorithm {
   // Minimum score gain (on the 0–1000 normalized scale) that counts as a
   // meaningful improvement; gains smaller than this are treated as stagnation.
   private static final float STAGNATION_SCORE_THRESHOLD = 0.5f;
+  private static final double DIFFERENTIAL_PAIR_CORRIDOR_HALF_WIDTH_FACTOR = 8.0;
 
   private final boolean remove_unconnected_vias;
   private final AutorouteControl.ExpansionCostFactor[] trace_cost_arr;
@@ -1300,6 +1302,8 @@ public class BatchAutorouter extends NamedAlgorithm {
       // working on
       AutorouteControl autoroute_control = new AutorouteControl(this.board, p_route_net_no, settings, curr_via_costs,
           traceCostsForRouterIntent(p_route_net_no));
+      autoroute_control.setRouterIntentPairCorridors(
+          routedDifferentialPairSiblingCorridors(settings.intent, route_net == null ? null : route_net.name));
       autoroute_control.ripup_allowed = true;
       autoroute_control.ripup_costs = this.start_ripup_costs * p_ripup_pass_no;
       autoroute_control.remove_unconnected_vias = this.remove_unconnected_vias;
@@ -1678,6 +1682,29 @@ public class BatchAutorouter extends NamedAlgorithm {
 
   private boolean[] routedDifferentialPairSiblingLayers(RouterIntentSettings intent, String routeNetName) {
     boolean[] result = new boolean[this.trace_cost_arr.length];
+    for (Trace trace : routedDifferentialPairSiblingTraces(intent, routeNetName)) {
+      int layer = trace.get_layer();
+      if (layer >= 0 && layer < result.length) {
+        result[layer] = true;
+      }
+    }
+    return result;
+  }
+
+  IntBox[] routedDifferentialPairSiblingCorridors(RouterIntentSettings intent, String routeNetName) {
+    List<IntBox> result = new ArrayList<>();
+    for (Trace trace : routedDifferentialPairSiblingTraces(intent, routeNetName)) {
+      IntBox box = trace.bounding_box();
+      if (box == null || box.is_empty()) {
+        continue;
+      }
+      result.add(box.offset(trace.get_half_width() * DIFFERENTIAL_PAIR_CORRIDOR_HALF_WIDTH_FACTOR));
+    }
+    return result.toArray(new IntBox[0]);
+  }
+
+  private List<Trace> routedDifferentialPairSiblingTraces(RouterIntentSettings intent, String routeNetName) {
+    List<Trace> result = new ArrayList<>();
     if (intent == null || routeNetName == null || this.board == null || this.board.rules == null) {
       return result;
     }
@@ -1696,10 +1723,7 @@ public class BatchAutorouter extends NamedAlgorithm {
       if (!trace.contains_net(siblingNet.net_number)) {
         continue;
       }
-      int layer = trace.get_layer();
-      if (layer >= 0 && layer < result.length) {
-        result[layer] = true;
-      }
+      result.add(trace);
     }
     return result;
   }
