@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import app.freerouting.board.Trace;
+import app.freerouting.board.Via;
 import app.freerouting.core.RoutingJob;
 import app.freerouting.drc.DesignRulesChecker;
 import app.freerouting.rules.Net;
@@ -35,6 +36,34 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
             + intentBottomLength);
   }
 
+  @Test
+  void protectedViaCostIntentChangesRoutedGeometry() {
+    RoutingJob baseline = routeWithIntent(null);
+    RoutingJob protectedNet = routeWithIntent(protectedNetIntent(STEERED_NET));
+
+    int baselineViaCount = viaCountOnNet(baseline, STEERED_NET);
+    int protectedViaCount = viaCountOnNet(protectedNet, STEERED_NET);
+    double baselineLength = routedLength(baseline, STEERED_NET);
+    double protectedLength = routedLength(protectedNet, STEERED_NET);
+
+    assertTrue(
+        protectedViaCount < baselineViaCount,
+        "expected source-copper via-cost intent to reduce routed vias for "
+            + STEERED_NET
+            + "; baseline="
+            + baselineViaCount
+            + ", intent="
+            + protectedViaCount);
+    assertTrue(
+        protectedLength > baselineLength,
+        "expected via-cost intent to accept a longer no-via route for "
+            + STEERED_NET
+            + "; baseline="
+            + baselineLength
+            + ", intent="
+            + protectedLength);
+  }
+
   private RoutingJob routeWithIntent(RouterIntentSettings intent) {
     TestingSettings settings = new TestingSettings();
     settings.setMaxPasses(20);
@@ -57,8 +86,20 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
     netIntent.net = netName;
     netIntent.priority = RouterIntentSettings.Priority.CRITICAL;
     netIntent.scope = RouterIntentSettings.Scope.GLOBAL;
-    netIntent.ripupProtection = RouterIntentSettings.RipupProtection.CRITICAL;
+    netIntent.ripupProtection = RouterIntentSettings.RipupProtection.NONE;
     netIntent.preferredLayers = new String[] { layerName };
+
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.netIntents = new RouterIntentSettings.NetIntent[] { netIntent };
+    return intent;
+  }
+
+  private RouterIntentSettings protectedNetIntent(String netName) {
+    RouterIntentSettings.NetIntent netIntent = new RouterIntentSettings.NetIntent();
+    netIntent.net = netName;
+    netIntent.priority = RouterIntentSettings.Priority.CRITICAL;
+    netIntent.scope = RouterIntentSettings.Scope.GLOBAL;
+    netIntent.ripupProtection = RouterIntentSettings.RipupProtection.SOURCE_COPPER;
 
     RouterIntentSettings intent = new RouterIntentSettings();
     intent.netIntents = new RouterIntentSettings.NetIntent[] { netIntent };
@@ -72,6 +113,28 @@ class RouterIntentRoutingIntegrationTest extends RoutingFixtureTest {
     for (Trace trace : job.board.get_traces()) {
       if (trace.contains_net(net.net_number) && trace.get_layer() == layer) {
         result += trace.get_length();
+      }
+    }
+    return result;
+  }
+
+  private double routedLength(RoutingJob job, String netName) {
+    Net net = job.board.rules.nets.get(netName, 1);
+    double result = 0.0;
+    for (Trace trace : job.board.get_traces()) {
+      if (trace.contains_net(net.net_number)) {
+        result += trace.get_length();
+      }
+    }
+    return result;
+  }
+
+  private int viaCountOnNet(RoutingJob job, String netName) {
+    Net net = job.board.rules.nets.get(netName, 1);
+    int result = 0;
+    for (Via via : job.board.get_vias()) {
+      if (via.contains_net(net.net_number)) {
+        result++;
       }
     }
     return result;
