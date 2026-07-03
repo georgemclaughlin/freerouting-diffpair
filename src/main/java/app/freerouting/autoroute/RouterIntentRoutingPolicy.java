@@ -14,6 +14,7 @@ final class RouterIntentRoutingPolicy {
   private static final double DIFFERENTIAL_PAIR_SIBLING_LAYER_COST_FACTOR = 3.0;
   private static final double DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR = 0.25;
   private static final double DIFFERENTIAL_PAIR_EXTRA_VIA_COST_FACTOR = 1.5;
+  private static final double DIFFERENTIAL_PAIR_UNMATCHED_VIA_TRANSITION_COST_FACTOR = 0.5;
 
   private RouterIntentRoutingPolicy() {
   }
@@ -93,6 +94,12 @@ final class RouterIntentRoutingPolicy {
   static double differentialPairCorridorExitCostFactor(RouterIntentSettings intent, String netName) {
     return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
         ? DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR
+        : 0.0;
+  }
+
+  static double differentialPairUnmatchedViaTransitionCostFactor(RouterIntentSettings intent, String netName) {
+    return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
+        ? DIFFERENTIAL_PAIR_UNMATCHED_VIA_TRANSITION_COST_FACTOR
         : 0.0;
   }
 

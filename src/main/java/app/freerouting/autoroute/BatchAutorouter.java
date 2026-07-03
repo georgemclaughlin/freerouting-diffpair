@@ -1304,6 +1304,10 @@ public class BatchAutorouter extends NamedAlgorithm {
           traceCostsForRouterIntent(p_route_net_no));
       autoroute_control.setRouterIntentPairCorridors(
           routedDifferentialPairSiblingCorridors(settings.intent, route_net == null ? null : route_net.name));
+      applyRouterIntentPairViaTransitionCosts(
+          autoroute_control,
+          settings.intent,
+          route_net == null ? null : route_net.name);
       autoroute_control.ripup_allowed = true;
       autoroute_control.ripup_costs = this.start_ripup_costs * p_ripup_pass_no;
       autoroute_control.remove_unconnected_vias = this.remove_unconnected_vias;
@@ -1703,6 +1707,78 @@ public class BatchAutorouter extends NamedAlgorithm {
     return result.toArray(new IntBox[0]);
   }
 
+  void applyRouterIntentPairViaTransitionCosts(
+      AutorouteControl control,
+      RouterIntentSettings intent,
+      String routeNetName) {
+    if (control == null || control.add_via_costs.length < 2) {
+      return;
+    }
+
+    double factor = RouterIntentRoutingPolicy.differentialPairUnmatchedViaTransitionCostFactor(
+        intent,
+        routeNetName);
+    if (factor <= 0.0) {
+      return;
+    }
+
+    boolean[][] siblingTransitions = routedDifferentialPairSiblingViaTransitions(
+        intent,
+        routeNetName,
+        control.layer_count);
+    if (!hasAnyTransition(siblingTransitions)) {
+      return;
+    }
+
+    int penalty = Math.max(1, (int) Math.round(control.min_normal_via_cost * factor));
+    for (int fromLayer = 0; fromLayer < control.layer_count; fromLayer++) {
+      for (int toLayer = 0; toLayer < control.layer_count; toLayer++) {
+        if (fromLayer == toLayer || siblingTransitions[fromLayer][toLayer]) {
+          continue;
+        }
+        control.add_via_costs[fromLayer].to_layer[toLayer] += penalty;
+      }
+    }
+  }
+
+  private boolean[][] routedDifferentialPairSiblingViaTransitions(
+      RouterIntentSettings intent,
+      String routeNetName,
+      int layerCount) {
+    boolean[][] result = new boolean[layerCount][layerCount];
+    if (intent == null || routeNetName == null || this.board == null || this.board.rules == null) {
+      return result;
+    }
+
+    String siblingNetName = intent.differentialPairSiblingNetForNet(routeNetName);
+    if (siblingNetName == null) {
+      return result;
+    }
+
+    Net siblingNet = this.board.rules.nets.get(siblingNetName, 1);
+    if (siblingNet == null) {
+      return result;
+    }
+
+    for (Via via : this.board.get_vias()) {
+      if (!via.contains_net(siblingNet.net_number)) {
+        continue;
+      }
+      int firstLayer = via.first_layer();
+      int lastLayer = via.last_layer();
+      if (firstLayer < 0
+          || lastLayer < 0
+          || firstLayer >= layerCount
+          || lastLayer >= layerCount
+          || firstLayer == lastLayer) {
+        continue;
+      }
+      result[firstLayer][lastLayer] = true;
+      result[lastLayer][firstLayer] = true;
+    }
+    return result;
+  }
+
   private List<Trace> routedDifferentialPairSiblingTraces(RouterIntentSettings intent, String routeNetName) {
     List<Trace> result = new ArrayList<>();
     if (intent == null || routeNetName == null || this.board == null || this.board.rules == null) {
@@ -1732,6 +1808,17 @@ public class BatchAutorouter extends NamedAlgorithm {
     for (boolean layer : layers) {
       if (layer) {
         return true;
+      }
+    }
+    return false;
+  }
+
+  private static boolean hasAnyTransition(boolean[][] transitions) {
+    for (boolean[] row : transitions) {
+      for (boolean transition : row) {
+        if (transition) {
+          return true;
+        }
       }
     }
     return false;
