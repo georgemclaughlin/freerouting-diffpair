@@ -109,6 +109,75 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
   }
 
   @Test
+  void penalizesRouteLengthMatchSkewWithoutNetIntent() {
+    RoutingJob routed = routedProtectedRipupFixture();
+    double keepLengthMm = traceLengthMm(routed, KEEP_NET);
+    double crossLengthMm = traceLengthMm(routed, CROSS_NET);
+    double skewMm = Math.abs(keepLengthMm - crossLengthMm);
+    RouterIntentSettings intent = routeLengthMatchIntent("matched_controls", skewMm - 0.5, KEEP_NET, CROSS_NET);
+
+    float genericScore = new BoardStatistics(routed.board).getNormalizedScore(routed.routerSettings.scoring);
+    float skewPenalty = RouterIntentBoardScorer.routeLengthMatchSkewPenalty(routed.board, intent);
+    float intentScore = RouterIntentBoardScorer.normalizedScore(
+        routed.board,
+        routed.routerSettings.scoring,
+        intent);
+
+    assertEquals(0, incompleteCount(routed, KEEP_NET));
+    assertEquals(0, incompleteCount(routed, CROSS_NET));
+    assertTrue(skewMm > 0.5, "fixture should route the two nets with measurable length skew");
+    assertEquals(30f, skewPenalty, 0.001f);
+    assertEquals(Math.max(0f, genericScore - skewPenalty), intentScore, 0.001f);
+  }
+
+  @Test
+  void avoidsDoubleSkewPenaltyForDifferentialPairRouteLengthMatches() {
+    RoutingJob routed = routedProtectedRipupFixture();
+    double keepLengthMm = traceLengthMm(routed, KEEP_NET);
+    double crossLengthMm = traceLengthMm(routed, CROSS_NET);
+    double skewMm = Math.abs(keepLengthMm - crossLengthMm);
+
+    RouterIntentSettings intent = differentialPairIntent(KEEP_NET, CROSS_NET, skewMm - 0.5);
+    intent.routeLengthMatches = new RouterIntentSettings.RouteLengthMatchIntent[] {
+        routeLengthMatch("matched_controls", skewMm - 0.5, KEEP_NET, CROSS_NET)
+    };
+
+    float genericScore = new BoardStatistics(routed.board).getNormalizedScore(routed.routerSettings.scoring);
+    float differentialPairPenalty = RouterIntentBoardScorer.differentialPairSkewPenalty(routed.board, intent);
+    float routeLengthMatchPenalty = RouterIntentBoardScorer.routeLengthMatchSkewPenalty(routed.board, intent);
+    float intentScore = RouterIntentBoardScorer.normalizedScore(
+        routed.board,
+        routed.routerSettings.scoring,
+        intent);
+
+    assertEquals(30f, differentialPairPenalty, 0.001f);
+    assertEquals(0f, routeLengthMatchPenalty, 0.001f);
+    assertEquals(Math.max(0f, genericScore - differentialPairPenalty), intentScore, 0.001f);
+  }
+
+  @Test
+  void ignoresMalformedRouteLengthMatchScoringGroups() {
+    RoutingJob routed = routedProtectedRipupFixture();
+    RouterIntentSettings.RouteLengthMatchIntent missingPriority = routeLengthMatch(
+        "missing_priority",
+        0.0,
+        KEEP_NET,
+        CROSS_NET);
+    missingPriority.priority = null;
+
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.routeLengthMatches = new RouterIntentSettings.RouteLengthMatchIntent[] {
+        routeLengthMatch("", 0.0, KEEP_NET, CROSS_NET),
+        missingPriority,
+        routeLengthMatch("missing_net", 0.0, KEEP_NET, "MISSING_NET"),
+        routeLengthMatch("negative_threshold", -1.0, KEEP_NET, CROSS_NET),
+        routeLengthMatch("single_net", 0.0, KEEP_NET)
+    };
+
+    assertEquals(0f, RouterIntentBoardScorer.routeLengthMatchSkewPenalty(routed.board, intent), 0.001f);
+  }
+
+  @Test
   void penalizesLocalScopeTraceExcursion() {
     RoutingJob routed = routedLocalScopeFixture();
     RouterIntentSettings strictLocalIntent = localScopeIntent(LOCAL_NET, 0.1, "L1.1");
@@ -270,6 +339,23 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
     RouterIntentSettings intent = new RouterIntentSettings();
     intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { differentialPair };
     return intent;
+  }
+
+  private RouterIntentSettings routeLengthMatchIntent(String id, double maxSkewMm, String... nets) {
+    RouterIntentSettings intent = new RouterIntentSettings();
+    intent.routeLengthMatches = new RouterIntentSettings.RouteLengthMatchIntent[] {
+        routeLengthMatch(id, maxSkewMm, nets)
+    };
+    return intent;
+  }
+
+  private RouterIntentSettings.RouteLengthMatchIntent routeLengthMatch(String id, double maxSkewMm, String... nets) {
+    RouterIntentSettings.RouteLengthMatchIntent match = new RouterIntentSettings.RouteLengthMatchIntent();
+    match.id = id;
+    match.nets = nets;
+    match.priority = RouterIntentSettings.Priority.CRITICAL;
+    match.maxSkewMm = maxSkewMm;
+    return match;
   }
 
   private RouterIntentSettings localScopeIntent(String netName, double maxDistanceMm, String... padRefs) {

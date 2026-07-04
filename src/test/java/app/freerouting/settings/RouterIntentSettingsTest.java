@@ -1,5 +1,6 @@
 package app.freerouting.settings;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -24,7 +25,7 @@ class RouterIntentSettingsTest {
     RouterIntentSettings intent = RouterIntentSettings.load(writePayload("router-intent.json", validPayload()));
 
     assertEquals("kicad-agent-router-intent", intent.schema);
-    assertEquals(2, intent.schemaVersion);
+    assertEquals(3, intent.schemaVersion);
     assertEquals("esp32_air_quality_node", intent.profile);
     assertEquals(RouterIntentSettings.RouteOrder.PRIORITY_THEN_LOCAL_SCOPE, intent.settings.routeOrder);
     assertEquals(
@@ -33,6 +34,7 @@ class RouterIntentSettingsTest {
     assertEquals(RouterIntentSettings.Priority.CRITICAL, intent.netIntents[0].priority);
     assertEquals(RouterIntentSettings.Scope.GLOBAL, intent.netIntents[0].scope);
     assertEquals(RouterIntentSettings.RipupProtection.CRITICAL, intent.netIntents[0].ripupProtection);
+    assertArrayEquals(new String[] { "matched_controls" }, intent.netIntents[0].routeLengthMatchIds);
     assertEquals(RouterIntentSettings.LocalSupportKind.SAME_NET_PAD_TIE, intent.localSupport[0].kind);
     assertEquals(3, intent.priorityRankForNet("3V3"));
     assertEquals(2, intent.scopeRankForNet("ESP_BOOT_LOCAL"));
@@ -44,6 +46,12 @@ class RouterIntentSettingsTest {
     assertTrue(intent.hasPreferredLayerIntent("3V3"));
     assertTrue(intent.isPreferredLayerForNet("3V3", "F.Cu"));
     assertFalse(intent.isPreferredLayerForNet("3V3", "B.Cu"));
+    assertTrue(intent.hasRouteLengthMatchIntents());
+    assertEquals("matched_controls", intent.routeLengthMatchGroupForNet("3V3"));
+    assertArrayEquals(new String[] { "ESP_BOOT_LOCAL" }, intent.routeLengthMatchSiblingNetsForNet("3V3"));
+    assertEquals(2.0, intent.routeLengthMatchMaxSkewMmForNet("3V3"));
+    assertEquals(RouterIntentSettings.Priority.HIGH, intent.routeLengthMatchPriorityForNet("3V3"));
+    assertEquals(1, intent.routeLengthMatchesForNet("3V3").length);
     assertEquals(0, intent.priorityRankForNet("UNMENTIONED"));
   }
 
@@ -107,6 +115,19 @@ class RouterIntentSettingsTest {
   }
 
   @Test
+  void rejectsUnsupportedRouteLengthMatchFieldsAndEnums() throws IOException {
+    Path fieldPayload = writePayload("bad-route-length-field.json", validPayload().replace(
+        "\"max_skew_mm\": 2.0",
+        "\"max_skew_mm\": 2.0,\n      \"freeform\": true"));
+    Path enumPayload = writePayload("bad-route-length-enum.json", validPayload().replace(
+        "\"priority\": \"high\",\n      \"max_skew_mm\": 2.0",
+        "\"priority\": \"urgent\",\n      \"max_skew_mm\": 2.0"));
+
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(fieldPayload));
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(enumPayload));
+  }
+
+  @Test
   void cliRouterIntentFilePopulatesRouterSettingsIntent() throws IOException {
     Path payload = writePayload("router-intent.json", validPayload());
 
@@ -141,7 +162,7 @@ class RouterIntentSettingsTest {
     return """
         {
           "schema": "kicad-agent-router-intent",
-          "schema_version": 2,
+          "schema_version": 3,
           "profile": "esp32_air_quality_node",
           "settings": {
             "deterministic_seed": 123,
@@ -164,6 +185,7 @@ class RouterIntentSettingsTest {
               "ripup_protection": "critical",
               "critical_path_ids": ["esp32_boot_pullup_supply_tie"],
               "differential_pair_ids": [],
+              "route_length_match_ids": ["matched_controls"],
               "local_support_ids": [],
               "block_port_ids": ["block_port_1_main_power_output"],
               "source_copper_ids": []
@@ -182,6 +204,7 @@ class RouterIntentSettingsTest {
               "ripup_protection": "local_support",
               "critical_path_ids": [],
               "differential_pair_ids": [],
+              "route_length_match_ids": ["matched_controls"],
               "local_support_ids": ["local_support_1_same_net_pad_tie"],
               "block_port_ids": [],
               "source_copper_ids": []
@@ -201,6 +224,14 @@ class RouterIntentSettingsTest {
             }
           ],
           "differential_pairs": [],
+          "route_length_matches": [
+            {
+              "id": "matched_controls",
+              "nets": ["3V3", "ESP_BOOT_LOCAL"],
+              "priority": "high",
+              "max_skew_mm": 2.0
+            }
+          ],
           "block_ports": [
             {
               "id": "block_port_1_main_power_output",

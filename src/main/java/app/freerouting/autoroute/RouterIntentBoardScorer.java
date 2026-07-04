@@ -18,6 +18,7 @@ final class RouterIntentBoardScorer {
   private static final float PROTECTED_VIA_PENALTY_POINTS = 20f;
   private static final float CRITICAL_PATH_EXCESS_LENGTH_PENALTY_POINTS_PER_MM = 10f;
   private static final float DIFFERENTIAL_PAIR_SKEW_PENALTY_POINTS_PER_MM = 20f;
+  private static final float ROUTE_LENGTH_MATCH_SKEW_PENALTY_POINTS_PER_MM = 20f;
   private static final float LOCAL_SCOPE_EXCURSION_PENALTY_POINTS_PER_MM = 5f;
   private static final float RETURN_PATH_PLANE_LAYER_PENALTY_POINTS_PER_MM = 8f;
 
@@ -36,6 +37,7 @@ final class RouterIntentBoardScorer {
         + protectedViaPenalty(board, intent)
         + criticalPathExcessLengthPenalty(board, intent)
         + differentialPairSkewPenalty(board, intent)
+        + routeLengthMatchSkewPenalty(board, intent)
         + localScopeExcursionPenalty(board, intent)
         + returnPathPlaneLayerPenalty(board, intent);
     return Math.max(0f, baseScore - intentPenalty);
@@ -169,6 +171,109 @@ final class RouterIntentBoardScorer {
     return penalty;
   }
 
+  static float routeLengthMatchSkewPenalty(RoutingBoard board, RouterIntentSettings intent) {
+    if (board == null
+        || board.rules == null
+        || board.rules.nets == null
+        || board.communication == null
+        || intent == null
+        || intent.routeLengthMatches == null
+        || intent.routeLengthMatches.length == 0) {
+      return 0f;
+    }
+
+    double mmResolution = board.communication.get_resolution(Unit.MM);
+    if (mmResolution <= 0) {
+      return 0f;
+    }
+
+    float penalty = 0f;
+    for (RouterIntentSettings.RouteLengthMatchIntent match : intent.routeLengthMatches) {
+      if (match == null
+          || match.id == null
+          || match.id.isEmpty()
+          || match.nets == null
+          || match.nets.length < 2
+          || match.priority == null
+          || match.maxSkewMm == null
+          || match.maxSkewMm < 0
+          || !Double.isFinite(match.maxSkewMm)) {
+        continue;
+      }
+      if (hasEquivalentDifferentialPair(intent, match)) {
+        continue;
+      }
+
+      double shortestLengthMm = Double.POSITIVE_INFINITY;
+      double longestLengthMm = 0.0;
+      boolean validGroup = true;
+      for (String netName : match.nets) {
+        if (netName == null || netName.isEmpty()) {
+          validGroup = false;
+          break;
+        }
+
+        Net net = board.rules.nets.get(netName, 1);
+        if (net == null) {
+          validGroup = false;
+          break;
+        }
+
+        double routedLengthMm = net.get_trace_length() / mmResolution;
+        if (routedLengthMm <= 0.0 || !Double.isFinite(routedLengthMm)) {
+          validGroup = false;
+          break;
+        }
+
+        shortestLengthMm = Math.min(shortestLengthMm, routedLengthMm);
+        longestLengthMm = Math.max(longestLengthMm, routedLengthMm);
+      }
+
+      if (!validGroup || shortestLengthMm == Double.POSITIVE_INFINITY) {
+        continue;
+      }
+
+      double excessMm = (longestLengthMm - shortestLengthMm) - match.maxSkewMm;
+      if (excessMm > 0) {
+        penalty += excessMm
+            * priorityRank(match.priority)
+            * ROUTE_LENGTH_MATCH_SKEW_PENALTY_POINTS_PER_MM;
+      }
+    }
+    return penalty;
+  }
+
+  private static boolean hasEquivalentDifferentialPair(
+      RouterIntentSettings intent,
+      RouterIntentSettings.RouteLengthMatchIntent match) {
+    if (intent == null
+        || intent.differentialPairs == null
+        || match == null
+        || match.nets == null
+        || match.nets.length != 2) {
+      return false;
+    }
+
+    String leftNet = match.nets[0];
+    String rightNet = match.nets[1];
+    if (leftNet == null || leftNet.isEmpty() || rightNet == null || rightNet.isEmpty()) {
+      return false;
+    }
+
+    for (RouterIntentSettings.DifferentialPairIntent differentialPair : intent.differentialPairs) {
+      if (differentialPair == null
+          || differentialPair.positiveNet == null
+          || differentialPair.negativeNet == null) {
+        continue;
+      }
+      if ((leftNet.equals(differentialPair.positiveNet) && rightNet.equals(differentialPair.negativeNet))
+          || (leftNet.equals(differentialPair.negativeNet) && rightNet.equals(differentialPair.positiveNet))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   static float localScopeExcursionPenalty(RoutingBoard board, RouterIntentSettings intent) {
     if (board == null || board.rules == null || intent == null || !intent.hasNetIntents()) {
       return 0f;
@@ -256,7 +361,8 @@ final class RouterIntentBoardScorer {
     return intent != null
         && (intent.hasNetIntents()
             || (intent.criticalPaths != null && intent.criticalPaths.length > 0)
-            || (intent.differentialPairs != null && intent.differentialPairs.length > 0));
+            || (intent.differentialPairs != null && intent.differentialPairs.length > 0)
+            || (intent.routeLengthMatches != null && intent.routeLengthMatches.length > 0));
   }
 
   private static int intentRank(RouterIntentSettings intent, String netName) {

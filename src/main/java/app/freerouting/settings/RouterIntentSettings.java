@@ -18,7 +18,7 @@ import java.util.Set;
 
 public class RouterIntentSettings implements Serializable, Cloneable {
   private static final String SCHEMA = "kicad-agent-router-intent";
-  private static final int SCHEMA_VERSION = 2;
+  private static final int SCHEMA_VERSION = 3;
   private static final Set<String> TOP_LEVEL_KEYS = Set.of(
       "schema",
       "schema_version",
@@ -27,6 +27,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       "net_intents",
       "critical_paths",
       "differential_pairs",
+      "route_length_matches",
       "local_support",
       "block_ports");
   private static final Set<String> SETTINGS_KEYS = Set.of(
@@ -50,6 +51,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       "ripup_protection",
       "critical_path_ids",
       "differential_pair_ids",
+      "route_length_match_ids",
       "local_support_ids",
       "block_port_ids",
       "source_copper_ids");
@@ -77,6 +79,11 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       "max_skew_mm",
       "max_stub_mm",
       "require_parallel_evidence");
+  private static final Set<String> ROUTE_LENGTH_MATCH_KEYS = Set.of(
+      "id",
+      "nets",
+      "priority",
+      "max_skew_mm");
   private static final Set<String> LOCAL_SUPPORT_KEYS = Set.of(
       "id",
       "kind",
@@ -139,6 +146,8 @@ public class RouterIntentSettings implements Serializable, Cloneable {
   public CriticalPathIntent[] criticalPaths;
   @SerializedName("differential_pairs")
   public DifferentialPairIntent[] differentialPairs;
+  @SerializedName("route_length_matches")
+  public RouteLengthMatchIntent[] routeLengthMatches;
   @SerializedName("local_support")
   public LocalSupportIntent[] localSupport;
   @SerializedName("block_ports")
@@ -186,6 +195,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     validateArrayObjectKeys(root, "net_intents", NET_INTENT_KEYS);
     validateArrayObjectKeys(root, "critical_paths", CRITICAL_PATH_KEYS);
     validateArrayObjectKeys(root, "differential_pairs", DIFFERENTIAL_PAIR_KEYS);
+    validateArrayObjectKeys(root, "route_length_matches", ROUTE_LENGTH_MATCH_KEYS);
     validateArrayObjectKeys(root, "local_support", LOCAL_SUPPORT_KEYS);
     validateArrayObjectKeys(root, "block_ports", BLOCK_PORT_KEYS);
     validateArrayStringValues(root, "net_intents", "priority", PRIORITY_VALUES);
@@ -193,6 +203,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     validateArrayStringValues(root, "net_intents", "ripup_protection", RIPUP_PROTECTION_VALUES);
     validateArrayStringValues(root, "critical_paths", "priority", PRIORITY_VALUES);
     validateArrayStringValues(root, "differential_pairs", "priority", PRIORITY_VALUES);
+    validateArrayStringValues(root, "route_length_matches", "priority", PRIORITY_VALUES);
     validateArrayStringValues(root, "local_support", "kind", LOCAL_SUPPORT_KIND_VALUES);
     validateArrayStringValues(root, "local_support", "priority", PRIORITY_VALUES);
     validateArrayStringValues(root, "block_ports", "kind", BLOCK_PORT_KIND_VALUES);
@@ -275,6 +286,10 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return this.differentialPairs != null && this.differentialPairs.length > 0;
   }
 
+  public boolean hasRouteLengthMatchIntents() {
+    return this.routeLengthMatches != null && this.routeLengthMatches.length > 0;
+  }
+
   public int priorityRankForNet(String netName) {
     NetIntent intent = netIntent(netName);
     return intent == null ? 0 : intent.priorityRank();
@@ -352,6 +367,49 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     String leftGroup = differentialPairGroupForNet(leftNetName);
     String rightGroup = differentialPairGroupForNet(rightNetName);
     return leftGroup != null && leftGroup.equals(rightGroup);
+  }
+
+  public RouteLengthMatchIntent[] routeLengthMatchesForNet(String netName) {
+    if (netName == null || this.routeLengthMatches == null || this.routeLengthMatches.length == 0) {
+      return new RouteLengthMatchIntent[0];
+    }
+
+    List<RouteLengthMatchIntent> result = new ArrayList<>();
+    for (RouteLengthMatchIntent match : this.routeLengthMatches) {
+      if (match != null && contains(match.nets, netName)) {
+        result.add(match);
+      }
+    }
+    return result.toArray(new RouteLengthMatchIntent[0]);
+  }
+
+  public String routeLengthMatchGroupForNet(String netName) {
+    return routeLengthMatchGroup(routeLengthMatchForNet(netName));
+  }
+
+  public String[] routeLengthMatchSiblingNetsForNet(String netName) {
+    RouteLengthMatchIntent match = routeLengthMatchForNet(netName);
+    if (match == null || match.nets == null || match.nets.length == 0) {
+      return new String[0];
+    }
+
+    List<String> result = new ArrayList<>();
+    for (String net : match.nets) {
+      if (net != null && !net.equals(netName)) {
+        result.add(net);
+      }
+    }
+    return result.toArray(new String[0]);
+  }
+
+  public Double routeLengthMatchMaxSkewMmForNet(String netName) {
+    RouteLengthMatchIntent match = routeLengthMatchForNet(netName);
+    return match == null ? null : match.maxSkewMm;
+  }
+
+  public Priority routeLengthMatchPriorityForNet(String netName) {
+    RouteLengthMatchIntent match = routeLengthMatchForNet(netName);
+    return match == null ? null : match.priority;
   }
 
   public LocalSupportIntent[] localSupportForNet(String netName) {
@@ -437,6 +495,18 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return null;
   }
 
+  private RouteLengthMatchIntent routeLengthMatchForNet(String netName) {
+    if (netName == null || this.routeLengthMatches == null || this.routeLengthMatches.length == 0) {
+      return null;
+    }
+    for (RouteLengthMatchIntent match : this.routeLengthMatches) {
+      if (match != null && contains(match.nets, netName)) {
+        return match;
+      }
+    }
+    return null;
+  }
+
   private NetIntent netIntent(String netName) {
     if (netName == null) {
       return null;
@@ -471,6 +541,25 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return false;
   }
 
+  private static String routeLengthMatchGroup(RouteLengthMatchIntent match) {
+    if (match == null) {
+      return null;
+    }
+    if (match.id != null && !match.id.isEmpty()) {
+      return match.id;
+    }
+    if (match.nets == null || match.nets.length == 0) {
+      return null;
+    }
+    List<String> nets = new ArrayList<>();
+    for (String net : match.nets) {
+      if (net != null && !net.isEmpty()) {
+        nets.add(net);
+      }
+    }
+    return nets.isEmpty() ? null : String.join(":", nets);
+  }
+
   @Override
   public RouterIntentSettings clone() {
     try {
@@ -479,6 +568,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       result.netIntents = this.netIntents != null ? this.netIntents.clone() : null;
       result.criticalPaths = this.criticalPaths != null ? this.criticalPaths.clone() : null;
       result.differentialPairs = this.differentialPairs != null ? this.differentialPairs.clone() : null;
+      result.routeLengthMatches = this.routeLengthMatches != null ? this.routeLengthMatches.clone() : null;
       result.localSupport = this.localSupport != null ? this.localSupport.clone() : null;
       result.blockPorts = this.blockPorts != null ? this.blockPorts.clone() : null;
       result.rebuildNetIntentIndex();
@@ -535,6 +625,8 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     public String[] criticalPathIds;
     @SerializedName("differential_pair_ids")
     public String[] differentialPairIds;
+    @SerializedName("route_length_match_ids")
+    public String[] routeLengthMatchIds;
     @SerializedName("local_support_ids")
     public String[] localSupportIds;
     @SerializedName("block_port_ids")
@@ -603,6 +695,17 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     public Double maxStubMm;
     @SerializedName("require_parallel_evidence")
     public Boolean requireParallelEvidence;
+  }
+
+  public static class RouteLengthMatchIntent implements Serializable {
+    @SerializedName("id")
+    public String id;
+    @SerializedName("nets")
+    public String[] nets;
+    @SerializedName("priority")
+    public Priority priority;
+    @SerializedName("max_skew_mm")
+    public Double maxSkewMm;
   }
 
   public static class LocalSupportIntent implements Serializable {
