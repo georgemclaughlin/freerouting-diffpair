@@ -425,6 +425,7 @@ public class DifferentialPairAutorouter {
       }
       if (pair_route_satisfies_intent(
           before,
+          maxSkew,
           baselineGap,
           baselineParallelLength,
           minParallelLengthRatio,
@@ -1298,10 +1299,12 @@ public class DifferentialPairAutorouter {
     List<PolylineTrace> companionTraces = collect_pair_traces(p_longer_member);
     traces.removeIf(Trace::is_user_fixed);
     traces.sort(Comparator.comparingDouble(DifferentialPairAutorouter::longest_segment_length).reversed());
+    Pin preferredPin = find_pin(p_shorter_member.netNo(), p_shorter_member.fromPin());
+    FloatPoint preferredAnchor = preferredPin == null ? null : preferredPin.get_center().to_float();
 
     int checkedCandidates = 0;
     for (PolylineTrace trace : traces) {
-      List<PairMeanderCandidate> candidates = build_pair_meander_candidates(trace, companionTraces, p_desired_extra);
+      List<PairMeanderCandidate> candidates = build_pair_meander_candidates(trace, companionTraces, p_desired_extra, preferredAnchor);
       for (PairMeanderCandidate candidate : candidates) {
         if (++checkedCandidates > MAX_CANDIDATES_PER_PASS) {
           return false;
@@ -1579,6 +1582,7 @@ public class DifferentialPairAutorouter {
 
   private boolean pair_route_satisfies_intent(
       PairMeasurements p_measurements,
+      double p_max_skew,
       double p_gap,
       double p_parallel_length,
       double p_min_parallel_length_ratio,
@@ -1594,7 +1598,7 @@ public class DifferentialPairAutorouter {
     double parallelRatio = referenceLength > 0.0 ? p_parallel_length / referenceLength : 0.0;
     double uncoupledLength = uncoupled_length(p_measurements, p_parallel_length);
     double tolerance = mm_to_board(board, 0.001);
-    return skew <= maxSkewBoard + tolerance
+    return skew <= p_max_skew + tolerance
         && (Double.isNaN(p_gap) || p_gap + tolerance >= p_min_pair_gap)
         && (Double.isNaN(p_gap) || p_gap <= p_max_pair_gap + tolerance)
         && (!p_require_parallel_evidence || p_parallel_length > 0.0)
@@ -2480,23 +2484,6 @@ public class DifferentialPairAutorouter {
         afterClearanceViolations);
   }
 
-  private Point insert_forced_coupled_trace(Point[] p_points, int p_layer, TraceStyle p_style, int p_net_no) {
-    Polyline polyline = new Polyline(p_points);
-    return board.insert_forced_trace_polyline(
-        polyline,
-        p_style.halfWidth(),
-        p_layer,
-        new int[] { p_net_no },
-        p_style.clearanceClass(),
-        COUPLED_INSERT_MAX_TRACE_RECURSION_DEPTH,
-        COUPLED_INSERT_MAX_VIA_RECURSION_DEPTH,
-        COUPLED_INSERT_MAX_SPRING_OVER_RECURSION_DEPTH,
-        Integer.MAX_VALUE,
-        COUPLED_INSERT_PULL_TIGHT_ACCURACY,
-        true,
-        null);
-  }
-
   private List<CoupledCandidate> ranked_coupled_candidates(
       List<CoupledCandidate> p_candidates,
       int p_limit,
@@ -2958,7 +2945,7 @@ public class DifferentialPairAutorouter {
 
     TraceStyle tunedStyle = tuneFirst ? p_first_style : p_second_style;
     double traceWidth = tunedStyle == null ? 0.0 : tunedStyle.halfWidth() * 2.0;
-    double targetShortLength = Math.max(firstLength, secondLength) + traceWidth * 2.0;
+    double targetShortLength = Math.max(firstLength, secondLength);
     double minBumpWidth = Math.max(
         mm_to_board(board, FLOW_THROUGH_MIN_BUMP_WIDTH_MM),
         Math.max(traceWidth * 4.0, p_center_spacing * 0.50));
@@ -5322,7 +5309,8 @@ public class DifferentialPairAutorouter {
   private List<PairMeanderCandidate> build_pair_meander_candidates(
       PolylineTrace p_trace,
       List<PolylineTrace> p_companion_traces,
-      double p_desired_extra) {
+      double p_desired_extra,
+      FloatPoint p_preferred_anchor) {
     List<PairMeanderCandidate> result = new ArrayList<>();
     Point[] corners = p_trace.polyline().corner_arr();
     if (corners.length < 2 || p_desired_extra <= 0.0) {
@@ -5358,15 +5346,20 @@ public class DifferentialPairAutorouter {
       if (coupledOverlap <= 0.0) {
         continue;
       }
+      double anchorDistance = p_preferred_anchor == null
+          ? 0.0
+          : midpoint(fromFloat, toFloat).distance(p_preferred_anchor);
       segmentCandidates.add(new PairMeanderSegmentCandidate(
           segmentIndex,
           segmentLength,
           normalX * outwardSign,
           normalY * outwardSign,
-          coupledOverlap));
+          coupledOverlap,
+          anchorDistance));
     }
     segmentCandidates.sort(Comparator
-        .comparingDouble(PairMeanderSegmentCandidate::coupledOverlap).reversed()
+        .comparingDouble(PairMeanderSegmentCandidate::anchorDistance)
+        .thenComparing(Comparator.comparingDouble(PairMeanderSegmentCandidate::coupledOverlap).reversed())
         .thenComparing(Comparator.comparingDouble(PairMeanderSegmentCandidate::length).reversed()));
 
     for (PairMeanderSegmentCandidate segment : segmentCandidates) {
@@ -5401,7 +5394,8 @@ public class DifferentialPairAutorouter {
                 segment.coupledOverlap(),
                 segment.length(),
                 bumpCount,
-                height));
+                height,
+                segment.anchorDistance()));
           }
         }
       }
@@ -6340,9 +6334,11 @@ public class DifferentialPairAutorouter {
       double coupledOverlap,
       double segmentLength,
       int bumpCount,
-      double height) {
+      double height,
+      double anchorDistance) {
     private double score(double p_desired_extra) {
       return Math.abs(addedLength - p_desired_extra)
+          + (anchorDistance * 0.10)
           - (coupledOverlap * 0.001)
           + (bumpCount * 0.0001)
           + (height * 0.00001);
@@ -6354,7 +6350,8 @@ public class DifferentialPairAutorouter {
       double length,
       double normalX,
       double normalY,
-      double coupledOverlap) {
+      double coupledOverlap,
+      double anchorDistance) {
   }
 
   private record FlowThroughBumpCandidate(
@@ -6427,10 +6424,6 @@ public class DifferentialPairAutorouter {
 
   private static int clearance_violation_count(RoutingBoard p_board) {
     return new DesignRulesChecker(p_board, null).getAllClearanceViolations().size();
-  }
-
-  private static int clearance_violation_count_excluding_pair(RoutingBoard p_board, DifferentialPair p_pair) {
-    return clearance_check_excluding_pair(p_board, p_pair, 0).count();
   }
 
   private static ClearanceCheck clearance_check_excluding_pair(
