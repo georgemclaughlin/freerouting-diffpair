@@ -5293,9 +5293,10 @@ public class DifferentialPairAutorouter {
         : Math.abs(after.first().length() - after.second().length());
     int afterIncompletes = incomplete_count(board);
     int afterClearanceViolations = clearance_violation_count(board);
+    boolean acceptableSkew = afterSkew <= p_max_skew + mm_to_board(board, 0.01);
+    boolean meaningfulImprovement = afterSkew < p_current_skew - mm_to_board(board, 0.05);
     if (Double.isFinite(afterSkew)
-        && afterSkew <= p_max_skew + mm_to_board(board, 0.01)
-        && afterSkew < p_current_skew
+        && (acceptableSkew || meaningfulImprovement)
         && afterIncompletes <= p_max_incompletes
         && afterClearanceViolations <= p_max_clearance_violations) {
       board.pop_snapshot();
@@ -5322,12 +5323,17 @@ public class DifferentialPairAutorouter {
         3.0 * p_trace.get_half_width());
     double maxHeight = Math.min(
         mm_to_board(board, PAIR_MEANDER_MAX_AMPLITUDE_MM),
-        mm_to_board(board, 1.45));
+        mm_to_board(board, 1.55));
     double traceMargin = Math.max(
         mm_to_board(board, PAIR_MEANDER_MIN_SPACING_MM),
         4.0 * p_trace.get_half_width());
+    double endpointGuard = corners.length > 3 && p_desired_extra > mm_to_board(board, 1.25)
+        ? Math.max(mm_to_board(board, 2.0), 8.0 * p_trace.get_half_width())
+        : 0.0;
+    double traceLength = point_path_length(corners);
 
     List<PairMeanderSegmentCandidate> segmentCandidates = new ArrayList<>();
+    double distanceFromTraceStart = 0.0;
     for (int segmentIndex = 0; segmentIndex < corners.length - 1; segmentIndex++) {
       if (!(corners[segmentIndex] instanceof IntPoint from) || !(corners[segmentIndex + 1] instanceof IntPoint to)) {
         continue;
@@ -5338,6 +5344,12 @@ public class DifferentialPairAutorouter {
       double dy = toFloat.y - fromFloat.y;
       double segmentLength = Math.sqrt(dx * dx + dy * dy);
       if (segmentLength <= 4.0 * traceMargin) {
+        distanceFromTraceStart += segmentLength;
+        continue;
+      }
+      double distanceFromTraceEnd = traceLength - distanceFromTraceStart - segmentLength;
+      if (distanceFromTraceStart < endpointGuard || distanceFromTraceEnd < endpointGuard) {
+        distanceFromTraceStart += segmentLength;
         continue;
       }
 
@@ -5346,6 +5358,7 @@ public class DifferentialPairAutorouter {
       int outwardSign = companion_outward_sign(fromFloat, toFloat, p_companion_traces, normalX, normalY);
       double coupledOverlap = nearby_parallel_overlap(fromFloat, toFloat, p_companion_traces);
       if (coupledOverlap <= 0.0) {
+        distanceFromTraceStart += segmentLength;
         continue;
       }
       double anchorDistance = p_preferred_anchor == null
@@ -5358,6 +5371,7 @@ public class DifferentialPairAutorouter {
           normalY * outwardSign,
           coupledOverlap,
           anchorDistance));
+      distanceFromTraceStart += segmentLength;
     }
     segmentCandidates.sort(Comparator
         .comparingDouble(PairMeanderSegmentCandidate::anchorDistance)
