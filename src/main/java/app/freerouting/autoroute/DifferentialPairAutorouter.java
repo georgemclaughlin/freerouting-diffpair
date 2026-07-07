@@ -5320,7 +5320,9 @@ public class DifferentialPairAutorouter {
     double minHeight = Math.max(
         mm_to_board(board, PAIR_MEANDER_MIN_AMPLITUDE_MM),
         3.0 * p_trace.get_half_width());
-    double maxHeight = mm_to_board(board, PAIR_MEANDER_MAX_AMPLITUDE_MM);
+    double maxHeight = Math.min(
+        mm_to_board(board, PAIR_MEANDER_MAX_AMPLITUDE_MM),
+        mm_to_board(board, 1.45));
     double traceMargin = Math.max(
         mm_to_board(board, PAIR_MEANDER_MIN_SPACING_MM),
         4.0 * p_trace.get_half_width());
@@ -5363,7 +5365,7 @@ public class DifferentialPairAutorouter {
         .thenComparing(Comparator.comparingDouble(PairMeanderSegmentCandidate::length).reversed()));
 
     for (PairMeanderSegmentCandidate segment : segmentCandidates) {
-      int[] bumpCounts = { 1, 2, 3, 4 };
+      int[] bumpCounts = { 4, 3, 2, 1 };
       for (int bumpCount : bumpCounts) {
         double usableLength = segment.length() - (2.0 * traceMargin);
         double minBumpWidth = Math.max(
@@ -5372,7 +5374,10 @@ public class DifferentialPairAutorouter {
         if (usableLength <= 0.0 || usableLength / bumpCount < minBumpWidth) {
           continue;
         }
-        double targetHeight = Math.max(minHeight, Math.min(p_desired_extra / (2.0 * bumpCount), maxHeight));
+        double angularAddedLengthPerHeight = 2.0 * (Math.sqrt(2.0) - 1.0);
+        double targetHeight = Math.max(
+            minHeight,
+            Math.min(p_desired_extra / (angularAddedLengthPerHeight * bumpCount), maxHeight));
         double maxCandidateHeight = Math.min(maxHeight, segment.length() / Math.max(3.0, bumpCount + 1.0));
         for (double height : detour_heights(targetHeight, minHeight, maxCandidateHeight)) {
           if (height <= 0.0) {
@@ -5388,9 +5393,10 @@ public class DifferentialPairAutorouter {
               traceMargin,
               minBumpWidth);
           if (candidate != null) {
+            double addedLength = point_path_length(candidate) - point_path_length(corners);
             result.add(new PairMeanderCandidate(
                 candidate,
-                2.0 * height * bumpCount,
+                addedLength,
                 segment.coupledOverlap(),
                 segment.length(),
                 bumpCount,
@@ -5525,51 +5531,98 @@ public class DifferentialPairAutorouter {
     double ux = dx / segmentLength;
     double uy = dy / segmentLength;
     double usableLength = segmentLength - (2.0 * p_margin);
-    double minPlateau = mm_to_board(board, FLOW_THROUGH_MIN_PLATEAU_MM);
-    double spacing = rounded_bump_spacing(p_height, minPlateau, p_margin);
-    double bumpLength = Math.max(
-        p_min_bump_width,
-        Math.max(
-            rounded_bump_width(p_height, minPlateau, spacing),
-            p_height * 2.5));
+    double minPlateau = mm_to_board(board, 0.50);
+    double spacing = mm_to_board(board, 0.45);
+    double plateau = Math.max(minPlateau, p_min_bump_width - (2.0 * p_height));
+    double bumpLength = (2.0 * p_height) + plateau;
     double meanderSpan = (bumpLength * p_bump_count) + (spacing * (p_bump_count - 1.0));
     if (bumpLength <= 0.0 || meanderSpan > usableLength) {
       return null;
     }
 
-    FloatPoint roundedFrom = shift_point(from.to_float(), ux * p_margin, uy * p_margin);
-    FloatPoint roundedTo = shift_point(to.to_float(), -ux * p_margin, -uy * p_margin);
-    Point[] rounded = rounded_outward_bump_path(
-        roundedFrom,
-        roundedTo,
+    double startAlong = p_margin + ((usableLength - meanderSpan) / 2.0);
+    Point[] angular = angular_outward_bump_path(
+        from.to_float(),
+        ux,
+        uy,
         p_normal_x,
         p_normal_y,
+        startAlong,
         p_bump_count,
         p_height,
-        bumpLength,
-        minPlateau,
+        plateau,
         spacing,
-        false);
-    if (rounded == null) {
+        mm_to_board(board, 0.08));
+    if (angular == null) {
       return null;
     }
-    for (Point point : rounded) {
+    for (Point point : angular) {
       if (!board.bounding_box.contains(point)) {
         return null;
       }
     }
 
-    List<Point> points = new ArrayList<>(p_corners.length + rounded.length);
+    List<Point> points = new ArrayList<>(p_corners.length + angular.length);
     for (int i = 0; i <= p_segment_index; i++) {
       append_distinct(points, p_corners[i]);
     }
-    for (Point point : rounded) {
+    for (Point point : angular) {
       append_distinct(points, point);
     }
     for (int i = p_segment_index + 1; i < p_corners.length; i++) {
       append_distinct(points, p_corners[i]);
     }
     return points.size() < 2 ? null : points.toArray(Point[]::new);
+  }
+
+  private static Point[] angular_outward_bump_path(
+      FloatPoint p_segment_from,
+      double p_axis_x,
+      double p_axis_y,
+      double p_normal_x,
+      double p_normal_y,
+      double p_start_along,
+      int p_bump_count,
+      double p_height,
+      double p_plateau,
+      double p_spacing,
+      double p_baseline_offset) {
+    if (p_bump_count <= 0 || p_height <= 0.0 || p_plateau <= 0.0) {
+      return null;
+    }
+    List<Point> result = new ArrayList<>();
+    double along = p_start_along;
+    append_distinct(result, shift_point(
+        p_segment_from,
+        (p_axis_x * along) + (p_normal_x * p_baseline_offset),
+        (p_axis_y * along) + (p_normal_y * p_baseline_offset)).round());
+    for (int bump = 0; bump < p_bump_count; bump++) {
+      FloatPoint baseStart = shift_point(
+          p_segment_from,
+          (p_axis_x * along) + (p_normal_x * p_baseline_offset),
+          (p_axis_y * along) + (p_normal_y * p_baseline_offset));
+      FloatPoint topStart = shift_point(
+          baseStart,
+          (p_axis_x * p_height) + (p_normal_x * p_height),
+          (p_axis_y * p_height) + (p_normal_y * p_height));
+      FloatPoint topEnd = shift_point(topStart, p_axis_x * p_plateau, p_axis_y * p_plateau);
+      FloatPoint baseEnd = shift_point(
+          topEnd,
+          (p_axis_x * p_height) - (p_normal_x * p_height),
+          (p_axis_y * p_height) - (p_normal_y * p_height));
+      append_distinct(result, baseStart.round());
+      append_distinct(result, topStart.round());
+      append_distinct(result, topEnd.round());
+      append_distinct(result, baseEnd.round());
+      along += (2.0 * p_height) + p_plateau + p_spacing;
+      if (bump < p_bump_count - 1) {
+        append_distinct(result, shift_point(
+            p_segment_from,
+            (p_axis_x * along) + (p_normal_x * p_baseline_offset),
+            (p_axis_y * along) + (p_normal_y * p_baseline_offset)).round());
+      }
+    }
+    return result.size() < 2 ? null : result.toArray(Point[]::new);
   }
 
   private static List<Double> detour_heights(double p_target_height, double p_min_height, double p_max_height) {

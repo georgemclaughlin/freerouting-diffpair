@@ -107,6 +107,7 @@ class DifferentialPairAutorouterTest {
 
     double oneMm = board.communication.get_resolution(Unit.MM);
     double beforeSkew = Math.abs(positive.get_trace_length() - negative.get_trace_length());
+    int beforeCornerCount = cornerCount(board, negative.net_number);
     assertTrue(beforeSkew > oneMm);
 
     RoutingJob job = new RoutingJob();
@@ -127,8 +128,8 @@ class DifferentialPairAutorouterTest {
     assertTrue(afterSkew <= oneMm + (oneMm * 0.01), "expected skew <= 1.01 mm, got " + (afterSkew / oneMm) + " mm");
     assertTrue(
         maxTraceTurnDegrees(board, negative.net_number) <= 60.0,
-        "expected rounded pair-aware meander without sharp 90-degree turns");
-    assertTrue(cornerCount(board, negative.net_number) > 10, "expected sampled rounded meander geometry");
+        "expected pair-aware meander without sharp 90-degree turns");
+    assertTrue(cornerCount(board, negative.net_number) > beforeCornerCount, "expected explicit angular meander geometry");
     assertEquals(0, new DesignRulesChecker(board, null).getAllClearanceViolations().size());
   }
 
