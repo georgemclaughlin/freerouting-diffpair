@@ -2322,8 +2322,12 @@ public class DifferentialPairAutorouter {
     double afterReferenceLength = Math.max(after.first().length(), after.second().length());
     double afterParallelRatio = afterReferenceLength > 0.0 ? afterParallelLength / afterReferenceLength : 0.0;
     double afterUncoupledLength = uncoupled_length(after, afterParallelLength);
+    boolean pairedGatewayCandidate = p_candidate.family().startsWith("paired_gateway_");
+    double allowedCorridorSkew = pairedGatewayCandidate
+        ? Math.max(p_max_skew, mm_to_board(board, 1.0))
+        : p_max_skew;
     if (after.scoped()
-        && skew <= p_max_skew
+        && skew <= allowedCorridorSkew
         && (Double.isNaN(afterGap) || afterGap >= p_min_pair_gap)
         && (Double.isNaN(afterGap) || afterGap <= p_max_pair_gap)
         && (!p_require_parallel_evidence || afterParallelLength > 0.0)
@@ -2332,7 +2336,7 @@ public class DifferentialPairAutorouter {
       CoupledCandidateEvaluation evaluation = new CoupledCandidateEvaluation(
           p_candidate,
           true,
-          "accepted",
+          skew <= p_max_skew ? "accepted" : "accepted paired gateway for post-route skew tuning",
           skew,
           afterGap,
           afterParallelLength,
@@ -2712,32 +2716,113 @@ public class DifferentialPairAutorouter {
           p_second_to,
           midpoint(p_first_from.get_center().to_float(), p_second_from.get_center().to_float()),
           escapeLength);
-      if (firstFromEscape == null || firstToEscape == null || secondFromEscape == null || secondToEscape == null) {
-        continue;
+      double gatewaySpacing = p_center_spacing + mm_to_board(board, 0.45);
+      double transitionLength = Math.max(p_center_spacing, mm_to_board(board, 2.0));
+      Point[] sourceWideGateway = paired_gateway_escape_points(
+          p_first_from.get_center().to_float(),
+          p_second_from.get_center().to_float(),
+          p_first_to.get_center().to_float(),
+          p_second_to.get_center().to_float(),
+          true,
+          gatewaySpacing,
+          escapeLength);
+      Point[] sourceGateway = paired_gateway_escape_points(
+          p_first_from.get_center().to_float(),
+          p_second_from.get_center().to_float(),
+          p_first_to.get_center().to_float(),
+          p_second_to.get_center().to_float(),
+          true,
+          p_center_spacing,
+          escapeLength + transitionLength);
+      Point[] targetWideGateway = paired_gateway_escape_points(
+          p_first_from.get_center().to_float(),
+          p_second_from.get_center().to_float(),
+          p_first_to.get_center().to_float(),
+          p_second_to.get_center().to_float(),
+          false,
+          gatewaySpacing,
+          escapeLength);
+      Point[] targetGateway = paired_gateway_escape_points(
+          p_first_from.get_center().to_float(),
+          p_second_from.get_center().to_float(),
+          p_first_to.get_center().to_float(),
+          p_second_to.get_center().to_float(),
+          false,
+          p_center_spacing,
+          escapeLength + transitionLength);
+      if (sourceWideGateway != null && sourceGateway != null && targetGateway != null && targetWideGateway != null) {
+        add_explicit_coupled_candidate(
+            result,
+            new FloatPoint[] {
+                p_first_from.get_center().to_float(),
+                sourceWideGateway[0].to_float(),
+                sourceGateway[0].to_float(),
+                targetGateway[0].to_float(),
+                targetWideGateway[0].to_float(),
+                p_first_to.get_center().to_float(),
+            },
+            new FloatPoint[] {
+                p_second_from.get_center().to_float(),
+                sourceWideGateway[1].to_float(),
+                sourceGateway[1].to_float(),
+                targetGateway[1].to_float(),
+                targetWideGateway[1].to_float(),
+                p_second_to.get_center().to_float(),
+            },
+            p_center_spacing,
+            "paired_gateway_direct");
+        for (CoupledCandidate candidate : coupled_candidates(
+            sourceGateway[0],
+            targetGateway[0],
+            sourceGateway[1],
+            targetGateway[1],
+            p_first_traces,
+            p_second_traces,
+            p_layer,
+            p_center_spacing)) {
+          Point[] first = wrap_with_pin_gateways(
+              p_first_from.get_center(),
+              prepend_append_gateways(sourceWideGateway[0], candidate.first(), targetWideGateway[0]),
+              p_first_to.get_center());
+          Point[] second = wrap_with_pin_gateways(
+              p_second_from.get_center(),
+              prepend_append_gateways(sourceWideGateway[1], candidate.second(), targetWideGateway[1]),
+              p_second_to.get_center());
+          if (candidate_geometry_is_safe(first, second, p_center_spacing, candidate.family().startsWith("order_transition_"))) {
+            result.add(new CoupledCandidate(
+                first,
+                second,
+                p_center_spacing,
+                "paired_gateway_" + candidate.family()));
+          }
+        }
       }
-      for (CoupledCandidate candidate : coupled_candidates(
-          firstFromEscape,
-          firstToEscape,
-          secondFromEscape,
-          secondToEscape,
-          p_first_traces,
-          p_second_traces,
-          p_layer,
-          p_center_spacing)) {
-        Point[] first = wrap_with_pin_gateways(
-            p_first_from.get_center(),
-            candidate.first(),
-            p_first_to.get_center());
-        Point[] second = wrap_with_pin_gateways(
-            p_second_from.get_center(),
-            candidate.second(),
-            p_second_to.get_center());
-        if (candidate_geometry_is_safe(first, second, p_center_spacing, candidate.family().startsWith("order_transition_"))) {
-          result.add(new CoupledCandidate(
-              first,
-              second,
-              p_center_spacing,
-              "pin_gateway_" + candidate.family()));
+
+      if (firstFromEscape != null && firstToEscape != null && secondFromEscape != null && secondToEscape != null) {
+        for (CoupledCandidate candidate : coupled_candidates(
+            firstFromEscape,
+            firstToEscape,
+            secondFromEscape,
+            secondToEscape,
+            p_first_traces,
+            p_second_traces,
+            p_layer,
+            p_center_spacing)) {
+          Point[] first = wrap_with_pin_gateways(
+              p_first_from.get_center(),
+              candidate.first(),
+              p_first_to.get_center());
+          Point[] second = wrap_with_pin_gateways(
+              p_second_from.get_center(),
+              candidate.second(),
+              p_second_to.get_center());
+          if (candidate_geometry_is_safe(first, second, p_center_spacing, candidate.family().startsWith("order_transition_"))) {
+            result.add(new CoupledCandidate(
+                first,
+                second,
+                p_center_spacing,
+                "pin_gateway_" + candidate.family()));
+          }
         }
       }
 
@@ -3952,6 +4037,55 @@ public class DifferentialPairAutorouter {
     return shift_point(pinCenter, dx / length * p_escape_length, dy / length * p_escape_length).round();
   }
 
+  private static Point[] paired_gateway_escape_points(
+      FloatPoint p_first_from,
+      FloatPoint p_second_from,
+      FloatPoint p_first_to,
+      FloatPoint p_second_to,
+      boolean p_source,
+      double p_center_spacing,
+      double p_escape_length) {
+    FloatPoint fromCenter = midpoint(p_first_from, p_second_from);
+    FloatPoint toCenter = midpoint(p_first_to, p_second_to);
+    double axisX = toCenter.x - fromCenter.x;
+    double axisY = toCenter.y - fromCenter.y;
+    double axisLength = Math.sqrt(axisX * axisX + axisY * axisY);
+    if (axisLength <= 0.0 || p_center_spacing <= 0.0 || p_escape_length <= 0.0) {
+      return null;
+    }
+    axisX /= axisLength;
+    axisY /= axisLength;
+
+    double normalX = p_first_to.x - p_second_to.x;
+    double normalY = p_first_to.y - p_second_to.y;
+    double normalLength = Math.sqrt(normalX * normalX + normalY * normalY);
+    if (normalLength <= 0.0) {
+      normalX = p_first_from.x - p_second_from.x;
+      normalY = p_first_from.y - p_second_from.y;
+      normalLength = Math.sqrt(normalX * normalX + normalY * normalY);
+      if (normalLength <= 0.0) {
+        return null;
+      }
+    }
+    normalX /= normalLength;
+    normalY /= normalLength;
+    FloatPoint sideFirst = p_source ? p_first_from : p_first_to;
+    FloatPoint sideSecond = p_source ? p_second_from : p_second_to;
+    if (side_of(sideFirst, sideSecond, normalX, normalY) < 0.0) {
+      normalX = -normalX;
+      normalY = -normalY;
+    }
+
+    FloatPoint center = p_source
+        ? shift_point(fromCenter, axisX * p_escape_length, axisY * p_escape_length)
+        : shift_point(toCenter, -axisX * p_escape_length, -axisY * p_escape_length);
+    double halfSpacing = p_center_spacing / 2.0;
+    return new Point[] {
+        shift_point(center, normalX * halfSpacing, normalY * halfSpacing).round(),
+        shift_point(center, -normalX * halfSpacing, -normalY * halfSpacing).round()
+    };
+  }
+
   private static Point directional_pin_escape_point(Pin p_pin, FloatPoint p_toward, double p_escape_length) {
     if (p_pin == null || p_toward == null) {
       return null;
@@ -3992,6 +4126,16 @@ public class DifferentialPairAutorouter {
       append_distinct(points, point);
     }
     append_distinct(points, p_end);
+    return points.toArray(Point[]::new);
+  }
+
+  private static Point[] prepend_append_gateways(Point p_first, Point[] p_body, Point p_last) {
+    List<Point> points = new ArrayList<>();
+    append_distinct(points, p_first);
+    for (Point point : p_body) {
+      append_distinct(points, point);
+    }
+    append_distinct(points, p_last);
     return points.toArray(Point[]::new);
   }
 
@@ -5132,7 +5276,7 @@ public class DifferentialPairAutorouter {
       return false;
     }
     double minDistance = nearest_polyline_distance(p_first, p_second);
-    return !Double.isFinite(minDistance) || minDistance >= p_center_spacing * 0.75;
+    return !Double.isFinite(minDistance) || minDistance >= p_center_spacing;
   }
 
   private static boolean endpoint_escape_moves_away_from_route(Point[] p_points, double p_center_spacing) {
