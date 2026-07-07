@@ -73,6 +73,7 @@ public class DifferentialPairAutorouter {
   private final RoutingJob job;
   private final RoutingBoard board;
   private final double maxSkewBoard;
+  private String lastSelectedCoupledCandidateFamily;
 
   public DifferentialPairAutorouter(RoutingJob p_job) {
     this(p_job, p_job.board, DEFAULT_MAX_SKEW_MM);
@@ -82,6 +83,11 @@ public class DifferentialPairAutorouter {
     this.job = p_job;
     this.board = p_board;
     this.maxSkewBoard = mm_to_board(p_board, p_max_skew_mm);
+    this.lastSelectedCoupledCandidateFamily = null;
+  }
+
+  String last_selected_coupled_candidate_family_for_test() {
+    return lastSelectedCoupledCandidateFamily;
   }
 
   /**
@@ -457,6 +463,7 @@ public class DifferentialPairAutorouter {
         pairName,
         true);
     if (committed.accepted()) {
+      lastSelectedCoupledCandidateFamily = bestCandidate.candidate().family();
       logInfo(String.format(Locale.US,
           "Differential pair %s/%s rerouted as a coupled top-layer corridor from family %s: parallel ratio %.3f, skew %.3f mm, gap %.3f mm.",
           firstNet.name,
@@ -1102,6 +1109,7 @@ public class DifferentialPairAutorouter {
         candidate_family_summary(evaluatedFamilies),
         candidate_family_summary(rejectedFamilies),
         rejection_summary(rejectionReasons)));
+    lastSelectedCoupledCandidateFamily = bestCandidate.candidate().family();
     return 1;
   }
 
