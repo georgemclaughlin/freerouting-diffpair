@@ -18,6 +18,7 @@ final class RouterIntentBoardScorer {
   private static final float PROTECTED_VIA_PENALTY_POINTS = 20f;
   private static final float CRITICAL_PATH_EXCESS_LENGTH_PENALTY_POINTS_PER_MM = 10f;
   private static final float DIFFERENTIAL_PAIR_SKEW_PENALTY_POINTS_PER_MM = 20f;
+  private static final float DIFFERENTIAL_PAIR_GAP_PENALTY_POINTS_PER_MM = 35f;
   private static final float ROUTE_LENGTH_MATCH_SKEW_PENALTY_POINTS_PER_MM = 20f;
   private static final float LOCAL_SCOPE_EXCURSION_PENALTY_POINTS_PER_MM = 5f;
   private static final float RETURN_PATH_PLANE_LAYER_PENALTY_POINTS_PER_MM = 8f;
@@ -37,6 +38,7 @@ final class RouterIntentBoardScorer {
         + protectedViaPenalty(board, intent)
         + criticalPathExcessLengthPenalty(board, intent)
         + differentialPairSkewPenalty(board, intent)
+        + differentialPairGapPenalty(board, intent)
         + routeLengthMatchSkewPenalty(board, intent)
         + localScopeExcursionPenalty(board, intent)
         + returnPathPlaneLayerPenalty(board, intent);
@@ -171,6 +173,61 @@ final class RouterIntentBoardScorer {
     return penalty;
   }
 
+  static float differentialPairGapPenalty(RoutingBoard board, RouterIntentSettings intent) {
+    if (board == null
+        || board.rules == null
+        || board.communication == null
+        || intent == null
+        || intent.differentialPairs == null
+        || intent.differentialPairs.length == 0) {
+      return 0f;
+    }
+
+    double mmResolution = board.communication.get_resolution(Unit.MM);
+    if (mmResolution <= 0) {
+      return 0f;
+    }
+
+    float penalty = 0f;
+    for (RouterIntentSettings.DifferentialPairIntent differentialPair : intent.differentialPairs) {
+      if (differentialPair == null
+          || differentialPair.positiveNet == null
+          || differentialPair.negativeNet == null
+          || !Boolean.TRUE.equals(differentialPair.routeAsCoupledPair)
+          || differentialPair.targetGapMm == null
+          || differentialPair.targetGapMm < 0) {
+        continue;
+      }
+
+      Net positiveNet = board.rules.nets.get(differentialPair.positiveNet, 1);
+      Net negativeNet = board.rules.nets.get(differentialPair.negativeNet, 1);
+      if (positiveNet == null || negativeNet == null) {
+        continue;
+      }
+
+      double nearestGapBoard = nearestTraceGap(board, positiveNet.net_number, negativeNet.net_number);
+      if (!Double.isFinite(nearestGapBoard)) {
+        continue;
+      }
+
+      double nearestGapMm = nearestGapBoard / mmResolution;
+      double toleranceMm = differentialPair.gapToleranceMm != null && differentialPair.gapToleranceMm >= 0
+          ? differentialPair.gapToleranceMm
+          : 0.0;
+      double lowLimitMm = Math.max(0.0, differentialPair.targetGapMm - toleranceMm);
+      double highLimitMm = differentialPair.targetGapMm + toleranceMm;
+      double excessMm = nearestGapMm < lowLimitMm
+          ? lowLimitMm - nearestGapMm
+          : Math.max(0.0, nearestGapMm - highLimitMm);
+      if (excessMm > 0) {
+        penalty += excessMm
+            * priorityRank(differentialPair.priority)
+            * DIFFERENTIAL_PAIR_GAP_PENALTY_POINTS_PER_MM;
+      }
+    }
+    return penalty;
+  }
+
   static float routeLengthMatchSkewPenalty(RoutingBoard board, RouterIntentSettings intent) {
     if (board == null
         || board.rules == null
@@ -272,6 +329,81 @@ final class RouterIntentBoardScorer {
       }
     }
     return false;
+  }
+
+  private static double nearestTraceGap(RoutingBoard board, int firstNetNo, int secondNetNo) {
+    double result = Double.POSITIVE_INFINITY;
+    for (Trace firstTrace : board.get_traces()) {
+      if (!(firstTrace instanceof PolylineTrace firstPolyline) || !firstTrace.contains_net(firstNetNo)) {
+        continue;
+      }
+      for (Trace secondTrace : board.get_traces()) {
+        if (!(secondTrace instanceof PolylineTrace secondPolyline)
+            || !secondTrace.contains_net(secondNetNo)
+            || firstTrace.get_layer() != secondTrace.get_layer()) {
+          continue;
+        }
+        double gap = nearestPolylineGap(firstPolyline, secondPolyline);
+        if (Double.isFinite(gap)) {
+          result = Math.min(result, gap);
+        }
+      }
+    }
+    return result;
+  }
+
+  private static double nearestPolylineGap(PolylineTrace firstTrace, PolylineTrace secondTrace) {
+    FloatPoint[] firstCorners = firstTrace.polyline().corner_approx_arr();
+    FloatPoint[] secondCorners = secondTrace.polyline().corner_approx_arr();
+    if (firstCorners.length < 2 || secondCorners.length < 2) {
+      return Double.NaN;
+    }
+
+    double centerlineDistance = Double.POSITIVE_INFINITY;
+    for (int i = 0; i < firstCorners.length - 1; i++) {
+      for (int j = 0; j < secondCorners.length - 1; j++) {
+        centerlineDistance = Math.min(
+            centerlineDistance,
+            segmentDistance(firstCorners[i], firstCorners[i + 1], secondCorners[j], secondCorners[j + 1]));
+      }
+    }
+    if (!Double.isFinite(centerlineDistance)) {
+      return Double.NaN;
+    }
+    return Math.max(0.0, centerlineDistance - firstTrace.get_half_width() - secondTrace.get_half_width());
+  }
+
+  private static double segmentDistance(FloatPoint firstStart, FloatPoint firstEnd, FloatPoint secondStart, FloatPoint secondEnd) {
+    if (segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd)) {
+      return 0.0;
+    }
+    return Math.min(
+        Math.min(pointSegmentDistance(firstStart, secondStart, secondEnd), pointSegmentDistance(firstEnd, secondStart, secondEnd)),
+        Math.min(pointSegmentDistance(secondStart, firstStart, firstEnd), pointSegmentDistance(secondEnd, firstStart, firstEnd)));
+  }
+
+  private static double pointSegmentDistance(FloatPoint point, FloatPoint segmentStart, FloatPoint segmentEnd) {
+    double dx = segmentEnd.x - segmentStart.x;
+    double dy = segmentEnd.y - segmentStart.y;
+    double lengthSquared = dx * dx + dy * dy;
+    if (lengthSquared <= 0.0) {
+      return point.distance(segmentStart);
+    }
+    double t = ((point.x - segmentStart.x) * dx + (point.y - segmentStart.y) * dy) / lengthSquared;
+    t = Math.max(0.0, Math.min(1.0, t));
+    return point.distance(new FloatPoint(segmentStart.x + t * dx, segmentStart.y + t * dy));
+  }
+
+  private static boolean segmentsIntersect(FloatPoint firstStart, FloatPoint firstEnd, FloatPoint secondStart, FloatPoint secondEnd) {
+    double o1 = orientation(firstStart, firstEnd, secondStart);
+    double o2 = orientation(firstStart, firstEnd, secondEnd);
+    double o3 = orientation(secondStart, secondEnd, firstStart);
+    double o4 = orientation(secondStart, secondEnd, firstEnd);
+    return o1 * o2 < 0.0 && o3 * o4 < 0.0;
+  }
+
+  private static double orientation(FloatPoint a, FloatPoint b, FloatPoint c) {
+    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
   }
 
   static float localScopeExcursionPenalty(RoutingBoard board, RouterIntentSettings intent) {

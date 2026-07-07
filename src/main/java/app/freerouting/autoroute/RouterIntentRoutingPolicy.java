@@ -3,6 +3,7 @@ package app.freerouting.autoroute;
 import app.freerouting.settings.RouterIntentSettings;
 
 final class RouterIntentRoutingPolicy {
+  private static final double HARD_CONSTRAINT_COST_FACTOR = 1_000_000_000.0;
   private static final double NON_PREFERRED_LAYER_COST_FACTOR = 4.0;
   private static final double CRITICAL_NET_VIA_COST_FACTOR = 1.5;
   private static final double LOCAL_SUPPORT_VIA_COST_FACTOR = 1.2;
@@ -13,6 +14,7 @@ final class RouterIntentRoutingPolicy {
   private static final double LOCAL_SCOPE_EXIT_COST_FACTOR = 6.0;
   private static final double DIFFERENTIAL_PAIR_SIBLING_LAYER_COST_FACTOR = 3.0;
   private static final double DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR = 0.25;
+  private static final double COUPLED_DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR = 12.0;
   private static final double DIFFERENTIAL_PAIR_EXTRA_VIA_COST_FACTOR = 1.5;
   private static final double DIFFERENTIAL_PAIR_UNMATCHED_VIA_TRANSITION_COST_FACTOR = 0.5;
   private static final double DIFFERENTIAL_PAIR_SKEW_EXCESS_COST_FACTOR = 1.0;
@@ -45,6 +47,13 @@ final class RouterIntentRoutingPolicy {
       String netName,
       String layerName,
       AutorouteControl.ExpansionCostFactor base) {
+    if (intent != null
+        && base != null
+        && !intent.isHardDifferentialPairLayerForNet(netName, layerName)) {
+      return new AutorouteControl.ExpansionCostFactor(
+          base.horizontal * HARD_CONSTRAINT_COST_FACTOR,
+          base.vertical * HARD_CONSTRAINT_COST_FACTOR);
+    }
     if (intent == null || base == null || !intent.hasPreferredLayerIntent(netName)
         || intent.isPreferredLayerForNet(netName, layerName)) {
       return base;
@@ -94,9 +103,12 @@ final class RouterIntentRoutingPolicy {
   }
 
   static double differentialPairCorridorExitCostFactor(RouterIntentSettings intent, String netName) {
-    return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
-        ? DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR
-        : 0.0;
+    if (intent == null || intent.differentialPairSiblingNetForNet(netName) == null) {
+      return 0.0;
+    }
+    return intent.requiresCoupledDifferentialPairRoute(netName)
+        ? COUPLED_DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR
+        : DIFFERENTIAL_PAIR_CORRIDOR_EXIT_COST_FACTOR;
   }
 
   static double differentialPairUnmatchedViaTransitionCostFactor(RouterIntentSettings intent, String netName) {
@@ -118,6 +130,9 @@ final class RouterIntentRoutingPolicy {
   }
 
   private static double differentialPairViaCostFactor(RouterIntentSettings intent, String netName) {
+    if (intent != null && intent.forbidsViasForDifferentialPairNet(netName)) {
+      return HARD_CONSTRAINT_COST_FACTOR;
+    }
     return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
         ? DIFFERENTIAL_PAIR_EXTRA_VIA_COST_FACTOR
         : 1.0;

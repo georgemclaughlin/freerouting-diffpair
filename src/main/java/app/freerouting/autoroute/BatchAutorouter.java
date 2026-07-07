@@ -71,7 +71,7 @@ public class BatchAutorouter extends NamedAlgorithm {
   // Minimum score gain (on the 0–1000 normalized scale) that counts as a
   // meaningful improvement; gains smaller than this are treated as stagnation.
   private static final float STAGNATION_SCORE_THRESHOLD = 0.5f;
-  private static final double DIFFERENTIAL_PAIR_CORRIDOR_HALF_WIDTH_FACTOR = 8.0;
+  private static final double DIFFERENTIAL_PAIR_CORRIDOR_HALF_WIDTH_FACTOR = 3.0;
 
   private final boolean remove_unconnected_vias;
   private final AutorouteControl.ExpansionCostFactor[] trace_cost_arr;

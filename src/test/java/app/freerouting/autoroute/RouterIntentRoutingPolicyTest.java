@@ -90,6 +90,31 @@ class RouterIntentRoutingPolicyTest {
   }
 
   @Test
+  void traceCostForLayerAppliesProhibitiveCostForHardPairLayerViolation() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "USB_D_PLUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL));
+    RouterIntentSettings.DifferentialPairIntent pair = differentialPair("usb2_data", "USB_D_PLUS", "USB_D_MINUS");
+    pair.allowedLayers = new String[] { "F.Cu" };
+    pair.sameLayerRequired = true;
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
+    AutorouteControl.ExpansionCostFactor base = new AutorouteControl.ExpansionCostFactor(2.0, 3.0);
+
+    assertSame(base, RouterIntentRoutingPolicy.traceCostForLayer(intent, "USB_D_PLUS", "F.Cu", base));
+    AutorouteControl.ExpansionCostFactor forbidden = RouterIntentRoutingPolicy.traceCostForLayer(
+        intent,
+        "USB_D_PLUS",
+        "In1.Cu",
+        base);
+
+    assertTrue(forbidden.horizontal > 1_000_000.0);
+    assertTrue(forbidden.vertical > 1_000_000.0);
+  }
+
+  @Test
   void traceCostForDifferentialPairSiblingLayerPenalizesLayersUnusedBySibling() {
     RouterIntentSettings intent = intentWith(
         netIntent(
@@ -180,6 +205,22 @@ class RouterIntentRoutingPolicyTest {
   }
 
   @Test
+  void viaCostFactorAppliesProhibitiveCostForHardNoViaPairMembers() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "USB_D_PLUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL));
+    RouterIntentSettings.DifferentialPairIntent pair = differentialPair("usb2_data", "USB_D_PLUS", "USB_D_MINUS");
+    pair.maxViasPerNet = 0;
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
+
+    assertTrue(RouterIntentRoutingPolicy.viaCostFactor(intent, "USB_D_PLUS") > 1_000_000.0);
+    assertEquals(1.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "VBUS"));
+  }
+
+  @Test
   void ripupCostFactorProtectsHigherRankedCopperMoreStrongly() {
     RouterIntentSettings intent = intentWith(
         netIntent(
@@ -249,6 +290,28 @@ class RouterIntentRoutingPolicyTest {
     assertTrue(RouterIntentRoutingPolicy.differentialPairSkewExcessCostFactor(intent, "USB_D_PLUS") > 0.0);
     assertTrue(RouterIntentRoutingPolicy.differentialPairSkewExcessCostFactor(intent, "USB_D_MINUS") > 0.0);
     assertEquals(0.0, RouterIntentRoutingPolicy.differentialPairSkewExcessCostFactor(intent, "VBUS"));
+  }
+
+  @Test
+  void coupledDifferentialPairUsesStrongCorridorExitCost() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "USB_D_PLUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL),
+        netIntent(
+            "USB_D_MINUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL));
+    RouterIntentSettings.DifferentialPairIntent pair = differentialPair("usb2_data", "USB_D_PLUS", "USB_D_MINUS");
+    pair.routeAsCoupledPair = true;
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
+
+    assertTrue(RouterIntentRoutingPolicy.differentialPairCorridorExitCostFactor(intent, "USB_D_PLUS") >= 10.0);
+    assertTrue(RouterIntentRoutingPolicy.differentialPairCorridorExitCostFactor(intent, "USB_D_MINUS") >= 10.0);
+    assertEquals(0.0, RouterIntentRoutingPolicy.differentialPairCorridorExitCostFactor(intent, "VBUS"));
   }
 
   @Test

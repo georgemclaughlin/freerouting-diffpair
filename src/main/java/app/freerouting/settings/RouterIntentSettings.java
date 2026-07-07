@@ -18,7 +18,7 @@ import java.util.Set;
 
 public class RouterIntentSettings implements Serializable, Cloneable {
   private static final String SCHEMA = "kicad-agent-router-intent";
-  private static final int SCHEMA_VERSION = 3;
+  private static final int SCHEMA_VERSION = 5;
   private static final Set<String> TOP_LEVEL_KEYS = Set.of(
       "schema",
       "schema_version",
@@ -76,8 +76,20 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       "negative_to",
       "positive_preferred_layers",
       "negative_preferred_layers",
+      "allowed_layers",
+      "same_layer_required",
+      "max_vias_per_net",
+      "matched_via_transitions_required",
+      "route_as_coupled_pair",
+      "target_width_mm",
+      "target_gap_mm",
+      "gap_tolerance_mm",
+      "endpoint_escape_width_mm",
+      "endpoint_escape_length_mm",
       "max_skew_mm",
       "max_stub_mm",
+      "min_parallel_length_ratio",
+      "max_uncoupled_length_mm",
       "require_parallel_evidence");
   private static final Set<String> ROUTE_LENGTH_MATCH_KEYS = Set.of(
       "id",
@@ -361,6 +373,30 @@ public class RouterIntentSettings implements Serializable, Cloneable {
   public Double differentialPairMaxSkewMmForNet(String netName) {
     DifferentialPairIntent pair = differentialPairForNet(netName);
     return pair == null ? null : pair.maxSkewMm;
+  }
+
+  public boolean isHardDifferentialPairLayerForNet(String netName, String layerName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    if (pair == null || !Boolean.TRUE.equals(pair.sameLayerRequired) || pair.allowedLayers == null
+        || pair.allowedLayers.length == 0) {
+      return true;
+    }
+    for (String allowedLayer : pair.allowedLayers) {
+      if (layerName != null && layerName.equals(allowedLayer)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public boolean forbidsViasForDifferentialPairNet(String netName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    return pair != null && pair.maxViasPerNet != null && pair.maxViasPerNet <= 0;
+  }
+
+  public boolean requiresCoupledDifferentialPairRoute(String netName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    return pair != null && Boolean.TRUE.equals(pair.routeAsCoupledPair);
   }
 
   public boolean areDifferentialPairMembers(String leftNetName, String rightNetName) {
@@ -689,10 +725,34 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     public String[] positivePreferredLayers;
     @SerializedName("negative_preferred_layers")
     public String[] negativePreferredLayers;
+    @SerializedName("allowed_layers")
+    public String[] allowedLayers;
+    @SerializedName("same_layer_required")
+    public Boolean sameLayerRequired;
+    @SerializedName("max_vias_per_net")
+    public Integer maxViasPerNet;
+    @SerializedName("matched_via_transitions_required")
+    public Boolean matchedViaTransitionsRequired;
+    @SerializedName("route_as_coupled_pair")
+    public Boolean routeAsCoupledPair;
+    @SerializedName("target_width_mm")
+    public Double targetWidthMm;
+    @SerializedName("target_gap_mm")
+    public Double targetGapMm;
+    @SerializedName("gap_tolerance_mm")
+    public Double gapToleranceMm;
+    @SerializedName("endpoint_escape_width_mm")
+    public Double endpointEscapeWidthMm;
+    @SerializedName("endpoint_escape_length_mm")
+    public Double endpointEscapeLengthMm;
     @SerializedName("max_skew_mm")
     public Double maxSkewMm;
     @SerializedName("max_stub_mm")
     public Double maxStubMm;
+    @SerializedName("min_parallel_length_ratio")
+    public Double minParallelLengthRatio;
+    @SerializedName("max_uncoupled_length_mm")
+    public Double maxUncoupledLengthMm;
     @SerializedName("require_parallel_evidence")
     public Boolean requireParallelEvidence;
   }

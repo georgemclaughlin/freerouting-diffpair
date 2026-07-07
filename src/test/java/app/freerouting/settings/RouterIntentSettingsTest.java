@@ -25,7 +25,7 @@ class RouterIntentSettingsTest {
     RouterIntentSettings intent = RouterIntentSettings.load(writePayload("router-intent.json", validPayload()));
 
     assertEquals("kicad-agent-router-intent", intent.schema);
-    assertEquals(3, intent.schemaVersion);
+    assertEquals(5, intent.schemaVersion);
     assertEquals("esp32_air_quality_node", intent.profile);
     assertEquals(RouterIntentSettings.RouteOrder.PRIORITY_THEN_LOCAL_SCOPE, intent.settings.routeOrder);
     assertEquals(
@@ -78,6 +78,69 @@ class RouterIntentSettingsTest {
     assertEquals(0.75, intent.differentialPairMaxSkewMmForNet("USB_D_MINUS"));
     assertTrue(intent.areDifferentialPairMembers("USB_D_PLUS", "USB_D_MINUS"));
     assertFalse(intent.areDifferentialPairMembers("USB_D_PLUS", "VBUS"));
+  }
+
+  @Test
+  void differentialPairAccessorsExposeHardUsbPolicy() {
+    RouterIntentSettings intent = new RouterIntentSettings();
+    RouterIntentSettings.DifferentialPairIntent pair = new RouterIntentSettings.DifferentialPairIntent();
+    pair.id = "usb2_data";
+    pair.positiveNet = "USB_D_PLUS";
+    pair.negativeNet = "USB_D_MINUS";
+    pair.allowedLayers = new String[] { "F.Cu" };
+    pair.sameLayerRequired = true;
+    pair.maxViasPerNet = 0;
+    pair.routeAsCoupledPair = true;
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
+
+    assertTrue(intent.isHardDifferentialPairLayerForNet("USB_D_PLUS", "F.Cu"));
+    assertFalse(intent.isHardDifferentialPairLayerForNet("USB_D_PLUS", "In1.Cu"));
+    assertTrue(intent.forbidsViasForDifferentialPairNet("USB_D_MINUS"));
+    assertTrue(intent.requiresCoupledDifferentialPairRoute("USB_D_PLUS"));
+    assertTrue(intent.isHardDifferentialPairLayerForNet("VBUS", "In1.Cu"));
+    assertFalse(intent.forbidsViasForDifferentialPairNet("VBUS"));
+  }
+
+  @Test
+  void loadsDifferentialPairMaxUncoupledLength() throws IOException {
+    RouterIntentSettings intent = RouterIntentSettings.load(writePayload(
+        "router-intent.json",
+        validPayload().replace(
+            "\"differential_pairs\": []",
+            """
+            "differential_pairs": [
+              {
+                "id": "usb2_data",
+                "positive_net": "USB_D+",
+                "negative_net": "USB_D-",
+                "priority": "critical",
+                "positive_from": "TP1.1",
+                "positive_to": "TP3.1",
+                "negative_from": "TP2.1",
+                "negative_to": "TP4.1",
+                "positive_preferred_layers": ["F.Cu"],
+                "negative_preferred_layers": ["F.Cu"],
+                "allowed_layers": ["F.Cu"],
+                "same_layer_required": true,
+                "max_vias_per_net": 0,
+                "matched_via_transitions_required": false,
+                "route_as_coupled_pair": true,
+                "target_width_mm": 0.2,
+                "target_gap_mm": 1.0,
+                "gap_tolerance_mm": 0.12,
+                "endpoint_escape_width_mm": null,
+                "endpoint_escape_length_mm": null,
+                "max_skew_mm": 0.2,
+                "max_stub_mm": 0.6,
+                "min_parallel_length_ratio": null,
+                "max_uncoupled_length_mm": 24.0,
+                "require_parallel_evidence": true
+              }
+            ]""")));
+
+    assertEquals(1, intent.differentialPairs.length);
+    assertEquals(24.0, intent.differentialPairs[0].maxUncoupledLengthMm);
+    assertTrue(intent.requiresCoupledDifferentialPairRoute("USB_D+"));
   }
 
   @Test
@@ -162,7 +225,7 @@ class RouterIntentSettingsTest {
     return """
         {
           "schema": "kicad-agent-router-intent",
-          "schema_version": 3,
+          "schema_version": 5,
           "profile": "esp32_air_quality_node",
           "settings": {
             "deterministic_seed": 123,

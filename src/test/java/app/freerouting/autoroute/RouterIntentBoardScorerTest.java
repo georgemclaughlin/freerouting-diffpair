@@ -109,6 +109,26 @@ class RouterIntentBoardScorerTest extends RoutingFixtureTest {
   }
 
   @Test
+  void penalizesDifferentialPairGapOutsideTargetTolerance() {
+    RoutingJob routed = routedProtectedRipupFixture();
+    RouterIntentSettings intent = differentialPairIntent(KEEP_NET, CROSS_NET, 0.0);
+    intent.differentialPairs[0].maxSkewMm = null;
+    intent.differentialPairs[0].routeAsCoupledPair = true;
+    intent.differentialPairs[0].targetGapMm = 0.0;
+    intent.differentialPairs[0].gapToleranceMm = 0.0;
+
+    float genericScore = new BoardStatistics(routed.board).getNormalizedScore(routed.routerSettings.scoring);
+    float gapPenalty = RouterIntentBoardScorer.differentialPairGapPenalty(routed.board, intent);
+    float intentScore = RouterIntentBoardScorer.normalizedScore(
+        routed.board,
+        routed.routerSettings.scoring,
+        intent);
+
+    assertTrue(gapPenalty > 0f, "fixture should route the two pair members with measurable spacing");
+    assertEquals(Math.max(0f, genericScore - gapPenalty), intentScore, 0.001f);
+  }
+
+  @Test
   void penalizesRouteLengthMatchSkewWithoutNetIntent() {
     RoutingJob routed = routedProtectedRipupFixture();
     double keepLengthMm = traceLengthMm(routed, KEEP_NET);

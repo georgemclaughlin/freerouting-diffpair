@@ -14,6 +14,8 @@ import app.freerouting.core.RoutingStage;
 import app.freerouting.core.StoppableThread;
 import app.freerouting.io.FileFormat;
 import app.freerouting.logger.FRLogger;
+import app.freerouting.rules.Net;
+import app.freerouting.settings.RouterIntentSettings;
 import app.freerouting.settings.RouterSettings;
 import app.freerouting.util.TextManager;
 import com.sun.management.ThreadMXBean;
@@ -94,6 +96,7 @@ public class RoutingJobSchedulerActionThread extends StoppableThread {
     // start the routing task if needed
     if (job.routerSettings.getRunRouter()) {
       job.stage = RoutingStage.ROUTING;
+      registerRouterIntentDifferentialPairs();
 
       // Select router implementation based on algorithm setting
       NamedAlgorithm router;
@@ -112,6 +115,17 @@ public class RoutingJobSchedulerActionThread extends StoppableThread {
           setJobOutput(job);
         }
       });
+
+      if (job.board != null
+          && job.board.rules != null
+          && job.board.rules.differential_pairs != null
+          && job.board.rules.differential_pairs.count() > 0
+          && !job.thread.isStopRequested()) {
+        int reservedPairs = new DifferentialPairAutorouter(job).preRouteCoupledPairs();
+        if (reservedPairs > 0) {
+          setJobOutput(job);
+        }
+      }
 
       // Call runBatchLoop
       batchRouter.runBatchLoop();
@@ -215,6 +229,54 @@ public class RoutingJobSchedulerActionThread extends StoppableThread {
     double durationSec = durationMs / 1000.0;
     job.logInfo("Job '" + job.shortName + "' finished with state: " + job.state.toString() +
         " (elapsed: " + FRLogger.formatDuration(durationSec) + ", finished at UTC: " + job.finishedAt.toString() + ").");
+  }
+
+  private void registerRouterIntentDifferentialPairs() {
+    if (job == null
+        || job.board == null
+        || job.board.rules == null
+        || job.board.rules.nets == null
+        || job.routerSettings == null
+        || job.routerSettings.intent == null
+        || job.routerSettings.intent.differentialPairs == null) {
+      return;
+    }
+
+    int registered = 0;
+    for (RouterIntentSettings.DifferentialPairIntent intentPair : job.routerSettings.intent.differentialPairs) {
+      if (intentPair == null || intentPair.positiveNet == null || intentPair.negativeNet == null) {
+        continue;
+      }
+      Net positiveNet = job.board.rules.nets.get(intentPair.positiveNet, 1);
+      Net negativeNet = job.board.rules.nets.get(intentPair.negativeNet, 1);
+      if (positiveNet == null || negativeNet == null) {
+        continue;
+      }
+      if (job.board.rules.differential_pairs.add(
+          positiveNet.net_number,
+          negativeNet.net_number,
+          routerIntentPadToSpecctraPin(intentPair.positiveFrom),
+          routerIntentPadToSpecctraPin(intentPair.positiveTo),
+          routerIntentPadToSpecctraPin(intentPair.negativeFrom),
+          routerIntentPadToSpecctraPin(intentPair.negativeTo)) != null) {
+        registered++;
+      }
+    }
+    if (registered > 0) {
+      job.logInfo("Registered " + registered + " router-intent differential pair"
+          + (registered == 1 ? "" : "s") + " in board rules.");
+    }
+  }
+
+  private static String routerIntentPadToSpecctraPin(String padRef) {
+    if (padRef == null || padRef.isBlank()) {
+      return null;
+    }
+    int separator = padRef.indexOf('.');
+    if (separator <= 0 || separator >= padRef.length() - 1) {
+      return padRef;
+    }
+    return padRef.substring(0, separator) + "-" + padRef.substring(separator + 1);
   }
 
   private void monitorCpuAndMemoryUsage(RoutingJob job) {
