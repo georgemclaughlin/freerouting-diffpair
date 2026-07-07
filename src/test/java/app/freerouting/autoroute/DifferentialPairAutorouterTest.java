@@ -139,10 +139,10 @@ class DifferentialPairAutorouterTest {
     DifferentialPairAutorouter autorouter = new DifferentialPairAutorouter(null, board, 1.0);
     FloatPoint from = new FloatPoint(10.0 * oneMm, 10.0 * oneMm);
     FloatPoint to = new FloatPoint(80.0 * oneMm, 10.0 * oneMm);
-	    double height = oneMm;
-	    double plateau = oneMm;
-	    double spacing = oneMm;
-	    double rawSpacing = 1.5 * oneMm;
+    double height = oneMm;
+    double plateau = oneMm;
+    double spacing = oneMm;
+    double rawSpacing = 1.5 * oneMm;
 
     Point[] sharpReturn = new Point[] {
         from.round(),
@@ -170,13 +170,13 @@ class DifferentialPairAutorouterTest {
         0.0,
         1.0,
         2,
-	        height,
-	        (3.5 * oneMm),
-	        plateau,
-	        rawSpacing,
-	        false);
-	    assertNotNull(rounded);
-	    assertTrue(rounded.length > 20, "expected sampled rounded corners");
+        height,
+        (3.5 * oneMm),
+        plateau,
+        rawSpacing,
+        false);
+    assertNotNull(rounded);
+    assertTrue(rounded.length > 20, "expected sampled rounded corners");
     assertTrue(autorouter.valid_flow_through_bump_shape_for_test(
         rounded,
         from,
@@ -189,6 +189,75 @@ class DifferentialPairAutorouterTest {
         spacing,
         2.0 * oneMm));
     assertTrue(maxTurnDegrees(rounded) <= 60.0, "expected no sharp 90-degree return");
+  }
+
+  @Test
+  void flowThroughPrimitiveFitterProducesFixtureScaleCandidates() throws Exception {
+    RoutingBoard board = loadBoard(TWO_NET_PAIR_DSN);
+    double oneMm = board.communication.get_resolution(Unit.MM);
+    DifferentialPairAutorouter autorouter = new DifferentialPairAutorouter(null, board, 1.0);
+    FloatPoint from = new FloatPoint(10.0 * oneMm, 10.0 * oneMm);
+    FloatPoint to = new FloatPoint(46.0 * oneMm, 10.0 * oneMm);
+    Point[] rounded = autorouter.rounded_outward_bump_path(
+        from,
+        to,
+        0.0,
+        1.0,
+        3,
+        2.5 * oneMm,
+        6.1 * oneMm,
+        0.8 * oneMm,
+        1.2 * oneMm,
+        true);
+    assertNotNull(rounded);
+    assertTrue(autorouter.valid_flow_through_bump_shape_for_test(
+        rounded,
+        from,
+        to,
+        0.0,
+        1.0,
+        3,
+        2.5 * oneMm,
+        0.8 * oneMm,
+        0.8 * oneMm,
+        2.5 * oneMm));
+    assertNotNull(autorouter.rounded_outward_bump_path(
+        from,
+        to,
+        0.0,
+        1.0,
+        2,
+        0.2 * oneMm,
+        1.3 * oneMm,
+        0.8 * oneMm,
+        0.8 * oneMm,
+        true));
+    assertTrue(autorouter.max_fit_flow_through_bump_count_for_test(
+        from,
+        to,
+        0.0,
+        1.0,
+        0.8 * oneMm,
+        0.8 * oneMm,
+        0.8 * oneMm,
+        0.2 * oneMm,
+        true) >= 2);
+
+    int candidateCount = autorouter.flow_through_primitive_candidate_count_for_test(
+        from,
+        to,
+        0.0,
+        1.0,
+        36.0 * oneMm,
+        40.4 * oneMm,
+        0.8 * oneMm,
+        0.8 * oneMm,
+        0.8 * oneMm,
+        0.2 * oneMm,
+        2.5 * oneMm,
+        true);
+
+    assertTrue(candidateCount > 0, "expected deterministic outward bump candidates");
   }
 
   private static double maxTraceTurnDegrees(RoutingBoard p_board, int p_net_no) {

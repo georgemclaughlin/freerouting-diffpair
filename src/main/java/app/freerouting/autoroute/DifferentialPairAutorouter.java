@@ -345,9 +345,8 @@ public class DifferentialPairAutorouter {
     Map<String, Integer> generatedFamilies = coupled_candidate_family_counts(candidates);
     candidates = ranked_coupled_candidates(candidates, MAX_COUPLED_REPLACE_CANDIDATES, targetCenterSpacing);
     Map<String, Integer> evaluatedFamilies = coupled_candidate_family_counts(candidates);
-	    CoupledCandidateEvaluation bestCandidate = null;
-	    CoupledCandidateEvaluation bestRejectedCandidate = null;
-	    CoupledCandidateEvaluation bestRejectedFlowThroughCandidate = null;
+    CoupledCandidateEvaluation bestCandidate = null;
+    CoupledCandidateEvaluation bestRejectedCandidate = null;
     CoupledCandidateEvaluation bestRejectedAnyCandidate = null;
     Map<String, Integer> rejectionReasons = new HashMap<>();
     Map<String, Integer> rejectedFamilies = new HashMap<>();
@@ -569,9 +568,9 @@ public class DifferentialPairAutorouter {
     Map<String, Integer> generatedFamilies = coupled_candidate_family_counts(candidates);
     candidates = ranked_coupled_candidates(candidates, MAX_COUPLED_REPLACE_CANDIDATES, targetCenterSpacing);
     Map<String, Integer> evaluatedFamilies = coupled_candidate_family_counts(candidates);
-	    CoupledCandidateEvaluation bestCandidate = null;
-	    CoupledCandidateEvaluation bestRejectedCandidate = null;
-	    Map<String, Integer> rejectionReasons = new HashMap<>();
+    CoupledCandidateEvaluation bestCandidate = null;
+    CoupledCandidateEvaluation bestRejectedCandidate = null;
+    Map<String, Integer> rejectionReasons = new HashMap<>();
     Map<String, Integer> rejectedFamilies = new HashMap<>();
     int evaluatedCandidateCount = 0;
     for (CoupledCandidate candidate : candidates) {
@@ -591,23 +590,23 @@ public class DifferentialPairAutorouter {
           maxPairGap,
           requireParallelEvidence,
           false);
-	      if (evaluation.accepted()
-	          && (bestCandidate == null || evaluation.score() > bestCandidate.score())) {
-	        bestCandidate = evaluation;
-	      } else if (!evaluation.accepted()) {
-	        rejectionReasons.merge(coupled_rejection_category(evaluation), 1, Integer::sum);
-	        rejectedFamilies.merge(candidate.family(), 1, Integer::sum);
-	        if (bestRejectedCandidate == null
-	            || (evaluation.hasMeasurements()
-	                && (!bestRejectedCandidate.hasMeasurements() || evaluation.score() > bestRejectedCandidate.score()))
-	            || (!evaluation.hasMeasurements()
+      if (evaluation.accepted()
+          && (bestCandidate == null || evaluation.score() > bestCandidate.score())) {
+        bestCandidate = evaluation;
+      } else if (!evaluation.accepted()) {
+        rejectionReasons.merge(coupled_rejection_category(evaluation), 1, Integer::sum);
+        rejectedFamilies.merge(candidate.family(), 1, Integer::sum);
+        if (bestRejectedCandidate == null
+            || (evaluation.hasMeasurements()
+                && (!bestRejectedCandidate.hasMeasurements() || evaluation.score() > bestRejectedCandidate.score()))
+            || (!evaluation.hasMeasurements()
                 && !bestRejectedCandidate.hasMeasurements()
                 && evaluation.rejectionScore() > bestRejectedCandidate.rejectionScore())) {
           bestRejectedCandidate = evaluation;
         }
       }
     }
-	    if (bestCandidate == null) {
+    if (bestCandidate == null) {
       logInfo(String.format(Locale.US,
           "Differential pair %s/%s could not repair missing scoped route; %d coupled top-layer candidates were evaluated. Best rejected: %s. Generated families: %s. Evaluated families: %s. Rejected families: %s. Rejections: %s",
           p_first_net.name,
@@ -998,10 +997,9 @@ public class DifferentialPairAutorouter {
     candidates = ranked_coupled_candidates(candidates, MAX_COUPLED_PREROUTE_CANDIDATES, targetCenterSpacing);
     Map<String, Integer> evaluatedFamilies = coupled_candidate_family_counts(candidates);
 
-	    CoupledCandidateEvaluation bestCandidate = null;
-	    CoupledCandidateEvaluation bestRejectedCandidate = null;
-	    CoupledCandidateEvaluation bestRejectedFlowThroughCandidate = null;
-	    Map<String, Integer> rejectionReasons = new HashMap<>();
+    CoupledCandidateEvaluation bestCandidate = null;
+    CoupledCandidateEvaluation bestRejectedCandidate = null;
+    Map<String, Integer> rejectionReasons = new HashMap<>();
     Map<String, Integer> rejectedFamilies = new HashMap<>();
     int evaluatedCandidateCount = 0;
     for (CoupledCandidate candidate : candidates) {
@@ -1021,18 +1019,13 @@ public class DifferentialPairAutorouter {
           maxPairGap,
           requireParallelEvidence,
           false);
-	      if (evaluation.accepted()
-	          && (bestCandidate == null || coupled_candidate_is_preferred(evaluation, bestCandidate))) {
-	        bestCandidate = evaluation;
-	      } else if (!evaluation.accepted()) {
-	        rejectionReasons.merge(coupled_rejection_category(evaluation), 1, Integer::sum);
-	        rejectedFamilies.merge(candidate.family(), 1, Integer::sum);
-	        if (candidate.family().startsWith("flow_through_skew_compensated")
-	            && (bestRejectedFlowThroughCandidate == null
-	                || evaluation.score() > bestRejectedFlowThroughCandidate.score())) {
-	          bestRejectedFlowThroughCandidate = evaluation;
-	        }
-	        if (bestRejectedCandidate == null
+      if (evaluation.accepted()
+          && (bestCandidate == null || coupled_candidate_is_preferred(evaluation, bestCandidate))) {
+        bestCandidate = evaluation;
+      } else if (!evaluation.accepted()) {
+        rejectionReasons.merge(coupled_rejection_category(evaluation), 1, Integer::sum);
+        rejectedFamilies.merge(candidate.family(), 1, Integer::sum);
+        if (bestRejectedCandidate == null
             || (evaluation.hasMeasurements()
                 && (!bestRejectedCandidate.hasMeasurements() || evaluation.score() > bestRejectedCandidate.score()))
             || (!evaluation.hasMeasurements()
@@ -1041,23 +1034,9 @@ public class DifferentialPairAutorouter {
           bestRejectedCandidate = evaluation;
         }
       }
-	    }
-	
-	    if (bestCandidate != null
-	        && !bestCandidate.candidate().family().startsWith("flow_through_skew_compensated")
-	        && bestRejectedFlowThroughCandidate != null) {
-	      logInfo(String.format(Locale.US,
-	          "Differential pair %s/%s selected non-shaped family %s; best rejected shaped flow-through candidate had parallel ratio %.3f, skew %.3f mm, gap %.3f mm: %s",
-	          firstNet.name,
-	          secondNet.name,
-	          bestCandidate.candidate().family(),
-	          bestRejectedFlowThroughCandidate.parallelRatio(),
-	          board_to_mm(board, bestRejectedFlowThroughCandidate.skew()),
-	          board_to_mm(board, bestRejectedFlowThroughCandidate.gap()),
-	          bestRejectedFlowThroughCandidate.reason()));
-	    }
+    }
 
-	    if (bestCandidate == null) {
+    if (bestCandidate == null) {
       if (bestRejectedCandidate == null) {
         logInfo(String.format(Locale.US,
             "Differential pair %s/%s did not reserve a pre-route corridor; %d coupled top-layer candidates were evaluated, but none survived DRC and scope checks. Generated families: %s. Evaluated families: %s. Rejected families: %s. Rejections: %s",
@@ -2937,11 +2916,6 @@ public class DifferentialPairAutorouter {
         p_center_spacing,
         "flow_through_direct");
 
-    double desiredExtra = Math.abs(firstLength - secondLength);
-    if (desiredExtra < mm_to_board(board, 0.10)) {
-      return;
-    }
-
     boolean tuneFirst = firstLength < secondLength;
     FloatPoint shortFrom = tuneFirst ? p_first_from : p_second_from;
     FloatPoint shortTo = tuneFirst ? p_first_to : p_second_to;
@@ -2984,79 +2958,23 @@ public class DifferentialPairAutorouter {
         mm_to_board(board, FLOW_THROUGH_MIN_BUMP_SPACING_MM),
         Math.max(traceWidth * 4.0, p_center_spacing * 0.50));
     double minPlateau = Math.max(mm_to_board(board, FLOW_THROUGH_MIN_PLATEAU_MM), traceWidth * 4.0);
-	    double minHeight = Math.max(
-	        mm_to_board(board, FLOW_THROUGH_MIN_BUMP_HEIGHT_MM),
-	        traceWidth);
+    double minHeight = Math.max(
+        mm_to_board(board, FLOW_THROUGH_MIN_BUMP_HEIGHT_MM),
+        traceWidth);
     double maxHeight = Math.max(minHeight, mm_to_board(board, FLOW_THROUGH_MAX_BUMP_HEIGHT_MM));
-    List<FlowThroughBumpCandidate> bumpCandidates = new ArrayList<>();
-	    double[] targetLengths = {
-	        targetShortLength,
-	        targetShortLength - mm_to_board(board, 0.10),
-	        targetShortLength - mm_to_board(board, 0.18),
-	        targetShortLength - mm_to_board(board, 0.24),
-	        targetShortLength - mm_to_board(board, 0.30),
-	        targetShortLength - mm_to_board(board, 0.36),
-	    };
-    for (int bumpCount : new int[] { 2, 3, 4, 5, 6, 7, 8 }) {
-      for (double targetLength : targetLengths) {
-        desiredExtra = targetLength - shortLength;
-        if (desiredExtra <= 0.0) {
-          continue;
-        }
-        FlowThroughBumpCandidate bestForCount = null;
-        double lowHeight = minHeight;
-	        double highHeight = maxHeight;
-	        for (int iteration = 0; iteration < 28; iteration++) {
-	          double height = (lowHeight + highHeight) / 2.0;
-	          double spacing = rounded_bump_spacing(height, minPlateau, minSpacing);
-	          double width = Math.max(minBumpWidth, rounded_bump_width(height, minPlateau, spacing));
-	          Point[] tuned = rounded_outward_bump_path(
-              shortFrom,
-              shortTo,
-              outwardX,
-              outwardY,
-	              bumpCount,
-	              height,
-	              width,
-	              minPlateau,
-	              spacing,
-	              nearTarget);
-          if (tuned == null) {
-            highHeight = height;
-            continue;
-          }
-          FlowThroughBumpShape shape = validate_flow_through_bump_shape(
-              tuned,
-              shortFrom,
-              shortTo,
-              outwardX,
-              outwardY,
-	              bumpCount,
-	              height,
-	              minPlateau,
-	              minSpacing,
-	              Math.min(maxHeight, spacing * 3.0));
-	          if (shape == null) {
-	            highHeight = height;
-	            continue;
-	          }
-          double addedLength = point_path_length(tuned) - shortLength;
-          double residualSkew = Math.abs((shortLength + addedLength) - targetShortLength);
-          FlowThroughBumpCandidate candidate = new FlowThroughBumpCandidate(tuned, residualSkew, shape);
-          if (bestForCount == null || candidate.score() < bestForCount.score()) {
-            bestForCount = candidate;
-          }
-          if (addedLength < desiredExtra) {
-            lowHeight = height;
-          } else {
-            highHeight = height;
-          }
-        }
-        if (bestForCount != null) {
-          bumpCandidates.add(bestForCount);
-        }
-      }
-    }
+    List<FlowThroughBumpCandidate> bumpCandidates = flow_through_primitive_candidates(
+        shortFrom,
+        shortTo,
+        outwardX,
+        outwardY,
+        shortLength,
+        targetShortLength,
+        minBumpWidth,
+        minSpacing,
+        minPlateau,
+        minHeight,
+        maxHeight,
+        nearTarget);
     double targetResidualSkew = mm_to_board(board, 0.10);
     bumpCandidates.sort(Comparator
         .comparing((FlowThroughBumpCandidate candidate) -> candidate.residualSkew() > targetResidualSkew)
@@ -3091,6 +3009,299 @@ public class DifferentialPairAutorouter {
     }
   }
 
+  private List<FlowThroughBumpCandidate> flow_through_primitive_candidates(
+      FloatPoint p_from,
+      FloatPoint p_to,
+      double p_outward_x,
+      double p_outward_y,
+      double p_short_length,
+      double p_target_short_length,
+      double p_min_bump_width,
+      double p_min_spacing,
+      double p_min_plateau,
+      double p_min_height,
+      double p_max_height,
+      boolean p_near_target) {
+    List<FlowThroughBumpCandidate> result = new ArrayList<>();
+    double desiredExtra = p_target_short_length - p_short_length;
+    if (desiredExtra <= 0.0) {
+      return result;
+    }
+    int maxCount = max_fit_flow_through_bump_count(
+        p_from,
+        p_to,
+        p_outward_x,
+        p_outward_y,
+        p_min_bump_width,
+        p_min_spacing,
+        p_min_plateau,
+        p_min_height,
+        p_near_target);
+    for (int bumpCount = maxCount; bumpCount >= 2; bumpCount--) {
+      FlowThroughBumpCandidate best = null;
+      double lowHeight = p_min_height;
+      double highHeight = p_max_height;
+      for (int iteration = 0; iteration < 28; iteration++) {
+        double height = (lowHeight + highHeight) / 2.0;
+        FlowThroughBumpCandidate uniform = flow_through_candidate_for_heights(
+            p_from,
+            p_to,
+            p_outward_x,
+            p_outward_y,
+            p_short_length,
+            p_target_short_length,
+            repeated_heights(bumpCount, height),
+            p_min_bump_width,
+            p_min_spacing,
+            p_min_plateau,
+            p_max_height,
+            p_near_target);
+        if (uniform == null) {
+          highHeight = height;
+          continue;
+        }
+        best = better_flow_through_candidate(best, uniform);
+        double addedLength = point_path_length(uniform.points()) - p_short_length;
+        if (addedLength < desiredExtra) {
+          lowHeight = height;
+        } else {
+          highHeight = height;
+        }
+      }
+      if (best != null) {
+        result.add(best);
+        result.addAll(trimmed_finish_flow_through_candidates(
+            best,
+            p_from,
+            p_to,
+            p_outward_x,
+            p_outward_y,
+            p_short_length,
+            p_target_short_length,
+            p_min_bump_width,
+            p_min_spacing,
+            p_min_plateau,
+            p_min_height,
+            p_max_height,
+            p_near_target));
+      }
+    }
+    return result;
+  }
+
+  int flow_through_primitive_candidate_count_for_test(
+      FloatPoint p_from,
+      FloatPoint p_to,
+      double p_outward_x,
+      double p_outward_y,
+      double p_short_length,
+      double p_target_short_length,
+      double p_min_bump_width,
+      double p_min_spacing,
+      double p_min_plateau,
+      double p_min_height,
+      double p_max_height,
+      boolean p_near_target) {
+    return flow_through_primitive_candidates(
+        p_from,
+        p_to,
+        p_outward_x,
+        p_outward_y,
+        p_short_length,
+        p_target_short_length,
+        p_min_bump_width,
+        p_min_spacing,
+        p_min_plateau,
+        p_min_height,
+        p_max_height,
+        p_near_target).size();
+  }
+
+  int max_fit_flow_through_bump_count_for_test(
+      FloatPoint p_from,
+      FloatPoint p_to,
+      double p_outward_x,
+      double p_outward_y,
+      double p_min_bump_width,
+      double p_min_spacing,
+      double p_min_plateau,
+      double p_min_height,
+      boolean p_near_target) {
+    return max_fit_flow_through_bump_count(
+        p_from,
+        p_to,
+        p_outward_x,
+        p_outward_y,
+        p_min_bump_width,
+        p_min_spacing,
+        p_min_plateau,
+        p_min_height,
+        p_near_target);
+  }
+
+  private List<FlowThroughBumpCandidate> trimmed_finish_flow_through_candidates(
+      FlowThroughBumpCandidate p_base,
+      FloatPoint p_from,
+      FloatPoint p_to,
+      double p_outward_x,
+      double p_outward_y,
+      double p_short_length,
+      double p_target_short_length,
+      double p_min_bump_width,
+      double p_min_spacing,
+      double p_min_plateau,
+      double p_min_height,
+      double p_max_height,
+      boolean p_near_target) {
+    List<FlowThroughBumpCandidate> result = new ArrayList<>();
+    int bumpCount = p_base.bumpCount();
+    if (bumpCount < 2) {
+      return result;
+    }
+    double fullHeight = Math.max(p_min_height, p_base.maxExcursion());
+    double lowHeight = p_min_height;
+    double highHeight = Math.min(p_max_height, fullHeight);
+    FlowThroughBumpCandidate best = null;
+    for (int iteration = 0; iteration < 24; iteration++) {
+      double finishHeight = (lowHeight + highHeight) / 2.0;
+      double[] heights = repeated_heights(bumpCount, fullHeight);
+      heights[bumpCount - 1] = finishHeight;
+      FlowThroughBumpCandidate candidate = flow_through_candidate_for_heights(
+          p_from,
+          p_to,
+          p_outward_x,
+          p_outward_y,
+          p_short_length,
+          p_target_short_length,
+          heights,
+          p_min_bump_width,
+          p_min_spacing,
+          p_min_plateau,
+          p_max_height,
+          p_near_target);
+      if (candidate == null) {
+        highHeight = finishHeight;
+        continue;
+      }
+      best = better_flow_through_candidate(best, candidate);
+      double addedLength = point_path_length(candidate.points()) - p_short_length;
+      if ((p_short_length + addedLength) < p_target_short_length) {
+        lowHeight = finishHeight;
+      } else {
+        highHeight = finishHeight;
+      }
+    }
+    if (best != null) {
+      result.add(best);
+    }
+    return result;
+  }
+
+  private FlowThroughBumpCandidate flow_through_candidate_for_heights(
+      FloatPoint p_from,
+      FloatPoint p_to,
+      double p_outward_x,
+      double p_outward_y,
+      double p_short_length,
+      double p_target_short_length,
+      double[] p_heights,
+      double p_min_bump_width,
+      double p_min_spacing,
+      double p_min_plateau,
+      double p_max_height,
+      boolean p_near_target) {
+    double maxHeight = max_height(p_heights);
+    double spacing = rounded_bump_spacing(maxHeight, p_min_plateau, p_min_spacing);
+    Point[] tuned = rounded_outward_bump_path(
+        p_from,
+        p_to,
+        p_outward_x,
+        p_outward_y,
+        p_heights,
+        p_min_bump_width,
+        p_min_plateau,
+        spacing,
+        p_near_target);
+    if (tuned == null) {
+      return null;
+    }
+    FlowThroughBumpShape shape = validate_flow_through_bump_shape(
+        tuned,
+        p_from,
+        p_to,
+        p_outward_x,
+        p_outward_y,
+        p_heights.length,
+        min_height(p_heights),
+        p_min_plateau,
+        p_min_spacing,
+        Math.min(p_max_height, spacing * 3.0));
+    if (shape == null) {
+      return null;
+    }
+    double addedLength = point_path_length(tuned) - p_short_length;
+    double residualSkew = Math.abs((p_short_length + addedLength) - p_target_short_length);
+    return new FlowThroughBumpCandidate(tuned, residualSkew, shape);
+  }
+
+  private int max_fit_flow_through_bump_count(
+      FloatPoint p_from,
+      FloatPoint p_to,
+      double p_outward_x,
+      double p_outward_y,
+      double p_min_bump_width,
+      double p_min_spacing,
+      double p_min_plateau,
+      double p_min_height,
+      boolean p_near_target) {
+    int result = 0;
+    double length = p_from.distance(p_to);
+    double spacing = rounded_bump_spacing(p_min_height, p_min_plateau, p_min_spacing);
+    double width = Math.max(p_min_bump_width, rounded_bump_width(p_min_height, p_min_plateau, spacing));
+    if (!Double.isFinite(spacing) || !Double.isFinite(width)) {
+      return 0;
+    }
+    double margin = Math.max(mm_to_board(board, 0.30), spacing * 0.50);
+    for (int bumpCount = 2; bumpCount <= 12; bumpCount++) {
+      double span = (width * bumpCount) + (spacing * (bumpCount - 1.0));
+      if (span + margin * 2.0 >= length) {
+        break;
+      }
+      result = bumpCount;
+    }
+    return result;
+  }
+
+  private static FlowThroughBumpCandidate better_flow_through_candidate(
+      FlowThroughBumpCandidate p_current,
+      FlowThroughBumpCandidate p_candidate) {
+    return p_current == null || p_candidate.score() < p_current.score() ? p_candidate : p_current;
+  }
+
+  private static double[] repeated_heights(int p_count, double p_height) {
+    double[] result = new double[p_count];
+    for (int i = 0; i < result.length; i++) {
+      result[i] = p_height;
+    }
+    return result;
+  }
+
+  private static double min_height(double[] p_heights) {
+    double result = Double.POSITIVE_INFINITY;
+    for (double height : p_heights) {
+      result = Math.min(result, height);
+    }
+    return result;
+  }
+
+  private static double max_height(double[] p_heights) {
+    double result = 0.0;
+    for (double height : p_heights) {
+      result = Math.max(result, height);
+    }
+    return result;
+  }
+
   Point[] rounded_outward_bump_path(
       FloatPoint p_from,
       FloatPoint p_to,
@@ -3102,39 +3313,60 @@ public class DifferentialPairAutorouter {
       double p_min_plateau,
       double p_spacing,
       boolean p_near_target) {
+    return rounded_outward_bump_path(
+        p_from,
+        p_to,
+        p_outward_x,
+        p_outward_y,
+        repeated_heights(p_bump_count, p_height),
+        p_width,
+        p_min_plateau,
+        p_spacing,
+        p_near_target);
+  }
+
+  private Point[] rounded_outward_bump_path(
+      FloatPoint p_from,
+      FloatPoint p_to,
+      double p_outward_x,
+      double p_outward_y,
+      double[] p_heights,
+      double p_min_bump_width,
+      double p_min_plateau,
+      double p_spacing,
+      boolean p_near_target) {
     double dx = p_to.x - p_from.x;
     double dy = p_to.y - p_from.y;
     double length = Math.sqrt(dx * dx + dy * dy);
-    if (length <= 0.0 || p_bump_count <= 0) {
+    if (length <= 0.0 || p_heights.length <= 0) {
       return null;
     }
     double ux = dx / length;
     double uy = dy / length;
-    double chamfer = p_height;
-    double plateau = p_width - (chamfer * 2.0);
-    if (chamfer <= 0.0 || plateau < p_min_plateau) {
-      return null;
-    }
     double margin = Math.max(mm_to_board(board, 0.30), p_spacing * 0.50);
-    double totalSpan = p_bump_count * p_width + (p_bump_count - 1.0) * p_spacing;
+    double[] widths = new double[p_heights.length];
+    double[] fillets = new double[p_heights.length];
+    double totalSpan = (p_heights.length - 1.0) * p_spacing;
+    for (int i = 0; i < p_heights.length; i++) {
+      double height = p_heights[i];
+      double width = Math.max(p_min_bump_width, rounded_bump_width(height, p_min_plateau, p_spacing));
+      double fillet = rounded_bump_fillet(height, p_min_plateau, p_spacing);
+      double plateau = width - (height * 2.0);
+      if (!Double.isFinite(width)
+          || !Double.isFinite(fillet)
+          || height <= 0.0
+          || plateau < p_min_plateau
+          || plateau - (2.0 * fillet) < p_min_plateau) {
+        return null;
+      }
+      widths[i] = width;
+      fillets[i] = fillet;
+      totalSpan += width;
+    }
     if (totalSpan + margin * 2.0 >= length) {
       return null;
     }
     double startDistance = p_near_target ? length - margin - totalSpan : margin;
-    double minRadius = Math.max(mm_to_board(board, 0.02), p_min_plateau / 8.0);
-    double maxRadius = Math.min((p_height / 2.0), p_spacing / 2.0);
-    if (maxRadius < minRadius) {
-      return null;
-    }
-    double radius = clamp((p_spacing * FLOW_THROUGH_KICAD_CORNER_RADIUS_PERCENT) / 200.0, minRadius, maxRadius);
-    double fillet = radius * Math.tan(Math.toRadians(22.5));
-    if (radius < minRadius
-        || fillet <= mm_to_board(board, 0.01)
-        || fillet > chamfer * 0.45
-        || fillet > plateau * 0.35
-        || plateau - (2.0 * fillet) < p_min_plateau) {
-      return null;
-    }
     double rampScale = 1.0 / Math.sqrt(2.0);
     double rampUpX = (ux + p_outward_x) * rampScale;
     double rampUpY = (uy + p_outward_y) * rampScale;
@@ -3142,18 +3374,21 @@ public class DifferentialPairAutorouter {
     double rampDownY = (uy - p_outward_y) * rampScale;
     List<Point> points = new ArrayList<>();
     append_distinct(points, p_from.round());
-    for (int i = 0; i < p_bump_count; i++) {
-      double bumpStart = startDistance + i * (p_width + p_spacing);
-      double bumpEnd = bumpStart + p_width;
+    double bumpStart = startDistance;
+    for (int i = 0; i < p_heights.length; i++) {
+      double height = p_heights[i];
+      double width = widths[i];
+      double fillet = fillets[i];
+      double bumpEnd = bumpStart + width;
       FloatPoint baseStart = shift_point(p_from, ux * bumpStart, uy * bumpStart);
       FloatPoint topStart = shift_point(
           p_from,
-          ux * (bumpStart + chamfer) + p_outward_x * p_height,
-          uy * (bumpStart + chamfer) + p_outward_y * p_height);
+          ux * (bumpStart + height) + p_outward_x * height,
+          uy * (bumpStart + height) + p_outward_y * height);
       FloatPoint plateauEnd = shift_point(
           p_from,
-          ux * (bumpEnd - chamfer) + p_outward_x * p_height,
-          uy * (bumpEnd - chamfer) + p_outward_y * p_height);
+          ux * (bumpEnd - height) + p_outward_x * height,
+          uy * (bumpEnd - height) + p_outward_y * height);
       FloatPoint baseEnd = shift_point(p_from, ux * bumpEnd, uy * bumpEnd);
       append_distinct(points, shift_point(baseStart, -ux * fillet, -uy * fillet).round());
       append_rounded_corner(points, baseStart, ux, uy, rampUpX, rampUpY, fillet);
@@ -3163,6 +3398,7 @@ public class DifferentialPairAutorouter {
       append_rounded_corner(points, plateauEnd, ux, uy, rampDownX, rampDownY, fillet);
       append_distinct(points, shift_point(baseEnd, -rampDownX * fillet, -rampDownY * fillet).round());
       append_rounded_corner(points, baseEnd, rampDownX, rampDownY, ux, uy, fillet);
+      bumpStart = bumpEnd + p_spacing;
     }
     append_distinct(points, p_to.round());
     return points.size() >= 2 ? points.toArray(Point[]::new) : null;
@@ -3367,36 +3603,36 @@ public class DifferentialPairAutorouter {
       boolean plateau = startExcursion >= minOutward
           && endExcursion >= minOutward
           && angle <= FLOW_THROUGH_MAX_RAMP_ANGLE_ERROR_DEG;
-	      boolean ramp = Math.abs(angle - 45.0) <= FLOW_THROUGH_MAX_RAMP_ANGLE_ERROR_DEG
-	          || angle <= FLOW_THROUGH_MAX_ROUNDED_SEGMENT_ANGLE_DEG;
-	      if (baseline) {
-	        if (inPlateau) {
-	          minPlateau = Math.min(minPlateau, currentPlateauLength);
-	          currentPlateauLength = 0.0;
-	          inPlateau = false;
-	        }
-	        continue;
-	      }
-	      if (plateau) {
-	        if (!inPlateau) {
-	          plateauCount++;
-	          inPlateau = true;
-	        }
-	        currentPlateauLength += segmentLength;
-	        continue;
-	      }
-	      if (inPlateau) {
-	        minPlateau = Math.min(minPlateau, currentPlateauLength);
-	        currentPlateauLength = 0.0;
-	        inPlateau = false;
-	      }
-	      if (segmentForward < -mm_to_board(board, 0.01) || !ramp || segmentOutward == 0.0) {
-	        return null;
-	      }
-	    }
-	    if (inPlateau) {
-	      minPlateau = Math.min(minPlateau, currentPlateauLength);
-	    }
+      boolean ramp = Math.abs(angle - 45.0) <= FLOW_THROUGH_MAX_RAMP_ANGLE_ERROR_DEG
+          || angle <= FLOW_THROUGH_MAX_ROUNDED_SEGMENT_ANGLE_DEG;
+      if (baseline) {
+        if (inPlateau) {
+          minPlateau = Math.min(minPlateau, currentPlateauLength);
+          currentPlateauLength = 0.0;
+          inPlateau = false;
+        }
+        continue;
+      }
+      if (plateau) {
+        if (!inPlateau) {
+          plateauCount++;
+          inPlateau = true;
+        }
+        currentPlateauLength += segmentLength;
+        continue;
+      }
+      if (inPlateau) {
+        minPlateau = Math.min(minPlateau, currentPlateauLength);
+        currentPlateauLength = 0.0;
+        inPlateau = false;
+      }
+      if (segmentForward < -mm_to_board(board, 0.01) || !ramp || segmentOutward == 0.0) {
+        return null;
+      }
+    }
+    if (inPlateau) {
+      minPlateau = Math.min(minPlateau, currentPlateauLength);
+    }
     if (plateauCount != p_bump_count || minPlateau < p_min_plateau) {
       return null;
     }
@@ -3451,6 +3687,26 @@ public class DifferentialPairAutorouter {
   }
 
   private double rounded_bump_width(double p_height, double p_min_plateau, double p_spacing) {
+    double fillet = rounded_bump_fillet(p_height, p_min_plateau, p_spacing);
+    if (!Double.isFinite(fillet)) {
+      return Double.POSITIVE_INFINITY;
+    }
+    return (2.0 * p_height) + p_min_plateau + (2.0 * fillet);
+  }
+
+  private double rounded_bump_spacing(double p_height, double p_min_plateau, double p_min_self_spacing) {
+    double spacing = p_min_self_spacing;
+    for (int i = 0; i < 4; i++) {
+      double fillet = rounded_bump_fillet(p_height, p_min_plateau, spacing);
+      if (!Double.isFinite(fillet)) {
+        return Double.POSITIVE_INFINITY;
+      }
+      spacing = p_min_self_spacing + (2.0 * fillet);
+    }
+    return spacing;
+  }
+
+  private double rounded_bump_fillet(double p_height, double p_min_plateau, double p_spacing) {
     double minRadius = Math.max(mm_to_board(board, 0.02), p_min_plateau / 8.0);
     double maxRadius = Math.min(p_height / 2.0, p_spacing / 2.0);
     if (maxRadius < minRadius) {
@@ -3458,22 +3714,10 @@ public class DifferentialPairAutorouter {
     }
     double radius = clamp((p_spacing * FLOW_THROUGH_KICAD_CORNER_RADIUS_PERCENT) / 200.0, minRadius, maxRadius);
     double fillet = radius * Math.tan(Math.toRadians(22.5));
-    return (2.0 * p_height) + p_min_plateau + (2.0 * fillet);
-  }
-
-  private double rounded_bump_spacing(double p_height, double p_min_plateau, double p_min_self_spacing) {
-    double spacing = p_min_self_spacing;
-    for (int i = 0; i < 4; i++) {
-      double minRadius = Math.max(mm_to_board(board, 0.02), p_min_plateau / 8.0);
-      double maxRadius = Math.min(p_height / 2.0, spacing / 2.0);
-      if (maxRadius < minRadius) {
-        return Double.POSITIVE_INFINITY;
-      }
-      double radius = clamp((spacing * FLOW_THROUGH_KICAD_CORNER_RADIUS_PERCENT) / 200.0, minRadius, maxRadius);
-      double fillet = radius * Math.tan(Math.toRadians(22.5));
-      spacing = p_min_self_spacing + (2.0 * fillet);
+    if (radius < minRadius || fillet <= mm_to_board(board, 0.01) || fillet > p_height * 0.45) {
+      return Double.POSITIVE_INFINITY;
     }
-    return spacing;
+    return fillet;
   }
 
   private static double clamp(double p_value, double p_min, double p_max) {
@@ -5276,17 +5520,17 @@ public class DifferentialPairAutorouter {
     if (segmentLength <= 0.0 || p_bump_count <= 0 || p_margin * 2.0 >= segmentLength) {
       return null;
     }
-	    double ux = dx / segmentLength;
-	    double uy = dy / segmentLength;
-	    double usableLength = segmentLength - (2.0 * p_margin);
-	    double minPlateau = mm_to_board(board, FLOW_THROUGH_MIN_PLATEAU_MM);
-	    double spacing = rounded_bump_spacing(p_height, minPlateau, p_margin);
-	    double bumpLength = Math.max(
-	        p_min_bump_width,
-	        Math.max(
-	            rounded_bump_width(p_height, minPlateau, spacing),
-	            p_height * 2.5));
-	    double meanderSpan = (bumpLength * p_bump_count) + (spacing * (p_bump_count - 1.0));
+    double ux = dx / segmentLength;
+    double uy = dy / segmentLength;
+    double usableLength = segmentLength - (2.0 * p_margin);
+    double minPlateau = mm_to_board(board, FLOW_THROUGH_MIN_PLATEAU_MM);
+    double spacing = rounded_bump_spacing(p_height, minPlateau, p_margin);
+    double bumpLength = Math.max(
+        p_min_bump_width,
+        Math.max(
+            rounded_bump_width(p_height, minPlateau, spacing),
+            p_height * 2.5));
+    double meanderSpan = (bumpLength * p_bump_count) + (spacing * (p_bump_count - 1.0));
     if (bumpLength <= 0.0 || meanderSpan > usableLength) {
       return null;
     }
@@ -5298,12 +5542,12 @@ public class DifferentialPairAutorouter {
         roundedTo,
         p_normal_x,
         p_normal_y,
-	        p_bump_count,
-	        p_height,
-	        bumpLength,
-	        minPlateau,
-	        spacing,
-	        false);
+        p_bump_count,
+        p_height,
+        bumpLength,
+        minPlateau,
+        spacing,
+        false);
     if (rounded == null) {
       return null;
     }
@@ -6115,6 +6359,10 @@ public class DifferentialPairAutorouter {
 
     private double height() {
       return shape.height();
+    }
+
+    private double maxExcursion() {
+      return shape.maxExcursion();
     }
 
     private double score() {
