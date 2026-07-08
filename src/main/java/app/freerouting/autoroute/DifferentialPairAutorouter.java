@@ -68,10 +68,8 @@ public class DifferentialPairAutorouter {
   private static final double FLOW_THROUGH_MIN_PLATEAU_MM = 0.60;
   private static final double FLOW_THROUGH_MAX_RAMP_ANGLE_ERROR_DEG = 8.0;
   private static final double FLOW_THROUGH_MAX_BEND_ANGLE_DEG = 60.0;
-  private static final double FLOW_THROUGH_MAX_ROUNDED_SEGMENT_ANGLE_DEG = 67.5;
-  private static final double FLOW_THROUGH_MAX_ROUNDED_TURN_DEG = 60.0;
-  private static final int FLOW_THROUGH_ROUNDED_RAMP_SAMPLES = 12;
-  private static final double FLOW_THROUGH_KICAD_CORNER_RADIUS_PERCENT = 80.0;
+  private static final double FLOW_THROUGH_MAX_TRANSITION_SEGMENT_ANGLE_DEG = 67.5;
+  private static final double FLOW_THROUGH_MAX_TRANSITION_TURN_DEG = 60.0;
 
   private final RoutingJob job;
   private final RoutingBoard board;
@@ -3772,8 +3770,8 @@ public class DifferentialPairAutorouter {
       double p_max_height,
       boolean p_near_target) {
     double maxHeight = max_height(p_heights);
-    double spacing = rounded_bump_spacing(maxHeight, p_min_plateau, p_min_spacing);
-    Point[] tuned = rounded_outward_bump_path(
+    double spacing = simple_bump_spacing(p_min_spacing);
+    Point[] tuned = simple_outward_bump_path(
         p_from,
         p_to,
         p_outward_x,
@@ -3817,8 +3815,8 @@ public class DifferentialPairAutorouter {
       boolean p_near_target) {
     int result = 0;
     double length = p_from.distance(p_to);
-    double spacing = rounded_bump_spacing(p_min_height, p_min_plateau, p_min_spacing);
-    double width = Math.max(p_min_bump_width, rounded_bump_width(p_min_height, p_min_plateau, spacing));
+    double spacing = simple_bump_spacing(p_min_spacing);
+    double width = Math.max(p_min_bump_width, simple_bump_width(p_min_height, p_min_plateau));
     if (!Double.isFinite(spacing) || !Double.isFinite(width)) {
       return 0;
     }
@@ -3863,7 +3861,7 @@ public class DifferentialPairAutorouter {
     return result;
   }
 
-  Point[] rounded_outward_bump_path(
+  Point[] simple_outward_bump_path(
       FloatPoint p_from,
       FloatPoint p_to,
       double p_outward_x,
@@ -3874,7 +3872,7 @@ public class DifferentialPairAutorouter {
       double p_min_plateau,
       double p_spacing,
       boolean p_near_target) {
-    return rounded_outward_bump_path(
+    return simple_outward_bump_path(
         p_from,
         p_to,
         p_outward_x,
@@ -3886,7 +3884,7 @@ public class DifferentialPairAutorouter {
         p_near_target);
   }
 
-  private Point[] rounded_outward_bump_path(
+  private Point[] simple_outward_bump_path(
       FloatPoint p_from,
       FloatPoint p_to,
       double p_outward_x,
@@ -3909,7 +3907,7 @@ public class DifferentialPairAutorouter {
     double totalSpan = (p_heights.length - 1.0) * p_spacing;
     for (int i = 0; i < p_heights.length; i++) {
       double height = p_heights[i];
-      double width = Math.max(p_min_bump_width, rounded_bump_width(height, p_min_plateau, p_spacing));
+      double width = Math.max(p_min_bump_width, simple_bump_width(height, p_min_plateau));
       double plateau = width - (height * 2.0);
       if (!Double.isFinite(width)
           || height <= 0.0
@@ -3948,96 +3946,6 @@ public class DifferentialPairAutorouter {
     }
     append_distinct(points, p_to.round());
     return points.size() >= 2 ? points.toArray(Point[]::new) : null;
-  }
-
-  private static void append_rounded_corner(
-      List<Point> p_points,
-      FloatPoint p_corner,
-      double p_in_x,
-      double p_in_y,
-      double p_out_x,
-      double p_out_y,
-      double p_tangent_length) {
-    FloatPoint start = shift_point(p_corner, -p_in_x * p_tangent_length, -p_in_y * p_tangent_length);
-    FloatPoint end = shift_point(p_corner, p_out_x * p_tangent_length, p_out_y * p_tangent_length);
-    FloatPoint center = circular_fillet_center(start, p_in_x, p_in_y, end, p_out_x, p_out_y);
-    if (center == null) {
-      append_distinct(p_points, end.round());
-      return;
-    }
-    double startAngle = Math.atan2(start.y - center.y, start.x - center.x);
-    double endAngle = Math.atan2(end.y - center.y, end.x - center.x);
-    double sweep = endAngle - startAngle;
-    while (sweep <= -Math.PI) {
-      sweep += 2.0 * Math.PI;
-    }
-    while (sweep > Math.PI) {
-      sweep -= 2.0 * Math.PI;
-    }
-    double radius = center.distance(start);
-    if (radius <= 0.0) {
-      append_distinct(p_points, end.round());
-      return;
-    }
-    for (int sample = 1; sample <= FLOW_THROUGH_ROUNDED_RAMP_SAMPLES; sample++) {
-      double t = (double) sample / FLOW_THROUGH_ROUNDED_RAMP_SAMPLES;
-      double angle = startAngle + sweep * t;
-      FloatPoint point = new FloatPoint(
-          center.x + Math.cos(angle) * radius,
-          center.y + Math.sin(angle) * radius);
-      append_distinct(p_points, point.round());
-    }
-  }
-
-  private static FloatPoint circular_fillet_center(
-      FloatPoint p_start,
-      double p_in_x,
-      double p_in_y,
-      FloatPoint p_end,
-      double p_out_x,
-      double p_out_y) {
-    FloatPoint best = null;
-    double bestSweep = Double.POSITIVE_INFINITY;
-    for (int startSign : new int[] { -1, 1 }) {
-      double startNormalX = -p_in_y * startSign;
-      double startNormalY = p_in_x * startSign;
-      for (int endSign : new int[] { -1, 1 }) {
-        double endNormalX = -p_out_y * endSign;
-        double endNormalY = p_out_x * endSign;
-        double determinant = (startNormalX * -endNormalY) - (startNormalY * -endNormalX);
-        if (Math.abs(determinant) <= 1e-9) {
-          continue;
-        }
-        double dx = p_end.x - p_start.x;
-        double dy = p_end.y - p_start.y;
-        double startScale = ((dx * -endNormalY) - (dy * -endNormalX)) / determinant;
-        FloatPoint center = shift_point(p_start, startNormalX * startScale, startNormalY * startScale);
-        double startRadius = center.distance(p_start);
-        double endRadius = center.distance(p_end);
-        if (startRadius <= 0.0 || Math.abs(startRadius - endRadius) > Math.max(1e-6, startRadius * 0.01)) {
-          continue;
-        }
-        double startAngle = Math.atan2(p_start.y - center.y, p_start.x - center.x);
-        double endAngle = Math.atan2(p_end.y - center.y, p_end.x - center.x);
-        double sweep = Math.abs(normalized_radian_delta(endAngle - startAngle));
-        if (sweep < bestSweep) {
-          bestSweep = sweep;
-          best = center;
-        }
-      }
-    }
-    return best;
-  }
-
-  private static double normalized_radian_delta(double p_angle) {
-    double result = p_angle;
-    while (result <= -Math.PI) {
-      result += 2.0 * Math.PI;
-    }
-    while (result > Math.PI) {
-      result -= 2.0 * Math.PI;
-    }
-    return result;
   }
 
   boolean valid_flow_through_bump_shape_for_test(
@@ -4150,7 +4058,7 @@ public class DifferentialPairAutorouter {
           && endExcursion >= minOutward
           && angle <= FLOW_THROUGH_MAX_RAMP_ANGLE_ERROR_DEG;
       boolean ramp = Math.abs(angle - 45.0) <= FLOW_THROUGH_MAX_RAMP_ANGLE_ERROR_DEG
-          || angle <= FLOW_THROUGH_MAX_ROUNDED_SEGMENT_ANGLE_DEG;
+          || angle <= FLOW_THROUGH_MAX_TRANSITION_SEGMENT_ANGLE_DEG;
       if (baseline) {
         if (inPlateau) {
           minPlateau = Math.min(minPlateau, currentPlateauLength);
@@ -4196,9 +4104,9 @@ public class DifferentialPairAutorouter {
           + ((p_points[i].to_float().y - p_from.y) * p_outward_y);
       double afterExcursion = ((p_points[i + 1].to_float().x - p_from.x) * p_outward_x)
           + ((p_points[i + 1].to_float().y - p_from.y) * p_outward_y);
-      boolean onRoundedTransition = Math.abs(beforeExcursion - cornerExcursion) > mm_to_board(board, 0.01)
+      boolean onTransverseTransition = Math.abs(beforeExcursion - cornerExcursion) > mm_to_board(board, 0.01)
           || Math.abs(afterExcursion - cornerExcursion) > mm_to_board(board, 0.01);
-      if (onRoundedTransition && turn > FLOW_THROUGH_MAX_ROUNDED_TURN_DEG) {
+      if (onTransverseTransition && turn > FLOW_THROUGH_MAX_TRANSITION_TURN_DEG) {
         return null;
       }
     }
@@ -4232,42 +4140,12 @@ public class DifferentialPairAutorouter {
     return (p_point.x - p_origin.x) * p_axis_x + (p_point.y - p_origin.y) * p_axis_y;
   }
 
-  private double rounded_bump_width(double p_height, double p_min_plateau, double p_spacing) {
-    double fillet = rounded_bump_fillet(p_height, p_min_plateau, p_spacing);
-    if (!Double.isFinite(fillet)) {
-      return Double.POSITIVE_INFINITY;
-    }
-    return (2.0 * p_height) + p_min_plateau + (2.0 * fillet);
+  private static double simple_bump_width(double p_height, double p_min_plateau) {
+    return (2.0 * p_height) + p_min_plateau;
   }
 
-  private double rounded_bump_spacing(double p_height, double p_min_plateau, double p_min_self_spacing) {
-    double spacing = p_min_self_spacing;
-    for (int i = 0; i < 4; i++) {
-      double fillet = rounded_bump_fillet(p_height, p_min_plateau, spacing);
-      if (!Double.isFinite(fillet)) {
-        return Double.POSITIVE_INFINITY;
-      }
-      spacing = p_min_self_spacing + (2.0 * fillet);
-    }
-    return spacing;
-  }
-
-  private double rounded_bump_fillet(double p_height, double p_min_plateau, double p_spacing) {
-    double minRadius = Math.max(mm_to_board(board, 0.02), p_min_plateau / 8.0);
-    double maxRadius = Math.min(p_height / 2.0, p_spacing / 2.0);
-    if (maxRadius < minRadius) {
-      return Double.POSITIVE_INFINITY;
-    }
-    double radius = clamp((p_spacing * FLOW_THROUGH_KICAD_CORNER_RADIUS_PERCENT) / 200.0, minRadius, maxRadius);
-    double fillet = radius * Math.tan(Math.toRadians(22.5));
-    if (radius < minRadius || fillet <= mm_to_board(board, 0.01) || fillet > p_height * 0.45) {
-      return Double.POSITIVE_INFINITY;
-    }
-    return fillet;
-  }
-
-  private static double clamp(double p_value, double p_min, double p_max) {
-    return Math.max(p_min, Math.min(p_max, p_value));
+  private static double simple_bump_spacing(double p_min_self_spacing) {
+    return p_min_self_spacing;
   }
 
   private List<MissingMemberCandidate> missing_member_candidates_from_companion_trace(

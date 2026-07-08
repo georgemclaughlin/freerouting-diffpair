@@ -134,7 +134,7 @@ class DifferentialPairAutorouterTest {
   }
 
   @Test
-  void flowThroughBumpPrimitiveRejectsSharpReturnsAndAcceptsRoundedPlateau() throws Exception {
+  void flowThroughBumpPrimitiveRejectsSharpReturnsAndAcceptsSimplePlateauBumps() throws Exception {
     RoutingBoard board = loadBoard(TWO_NET_PAIR_DSN);
     double oneMm = board.communication.get_resolution(Unit.MM);
     DifferentialPairAutorouter autorouter = new DifferentialPairAutorouter(null, board, 1.0);
@@ -165,7 +165,7 @@ class DifferentialPairAutorouterTest {
         spacing,
         2.0 * oneMm));
 
-    Point[] rounded = autorouter.rounded_outward_bump_path(
+    Point[] simple = autorouter.simple_outward_bump_path(
         from,
         to,
         0.0,
@@ -176,10 +176,21 @@ class DifferentialPairAutorouterTest {
         plateau,
         rawSpacing,
         false);
-    assertNotNull(rounded);
-    assertEquals(10, rounded.length, "expected two simple 45-degree plateau bumps");
+    assertNotNull(simple);
+    assertEquals(10, simple.length, "expected two simple 45-degree plateau bumps");
+    assertSimpleOutwardBumpPattern(
+        simple,
+        from,
+        to,
+        0.0,
+        1.0,
+        2,
+        height,
+        plateau,
+        rawSpacing,
+        oneMm);
     assertTrue(autorouter.valid_flow_through_bump_shape_for_test(
-        rounded,
+        simple,
         from,
         to,
         0.0,
@@ -189,7 +200,7 @@ class DifferentialPairAutorouterTest {
         plateau,
         spacing,
         2.0 * oneMm));
-    assertTrue(maxTurnDegrees(rounded) <= 60.0, "expected no sharp 90-degree return");
+    assertTrue(maxTurnDegrees(simple) <= 60.0, "expected no sharp 90-degree return");
   }
 
   @Test
@@ -199,7 +210,7 @@ class DifferentialPairAutorouterTest {
     DifferentialPairAutorouter autorouter = new DifferentialPairAutorouter(null, board, 1.0);
     FloatPoint from = new FloatPoint(10.0 * oneMm, 10.0 * oneMm);
     FloatPoint to = new FloatPoint(46.0 * oneMm, 10.0 * oneMm);
-    Point[] rounded = autorouter.rounded_outward_bump_path(
+    Point[] simple = autorouter.simple_outward_bump_path(
         from,
         to,
         0.0,
@@ -210,9 +221,21 @@ class DifferentialPairAutorouterTest {
         0.8 * oneMm,
         1.2 * oneMm,
         true);
-    assertNotNull(rounded);
+    assertNotNull(simple);
+    assertEquals(14, simple.length, "expected three simple 45-degree plateau bumps");
+    assertSimpleOutwardBumpPattern(
+        simple,
+        from,
+        to,
+        0.0,
+        1.0,
+        3,
+        2.5 * oneMm,
+        0.8 * oneMm,
+        1.2 * oneMm,
+        oneMm);
     assertTrue(autorouter.valid_flow_through_bump_shape_for_test(
-        rounded,
+        simple,
         from,
         to,
         0.0,
@@ -222,7 +245,7 @@ class DifferentialPairAutorouterTest {
         0.8 * oneMm,
         0.8 * oneMm,
         2.5 * oneMm));
-    assertNotNull(autorouter.rounded_outward_bump_path(
+    assertNotNull(autorouter.simple_outward_bump_path(
         from,
         to,
         0.0,
@@ -324,6 +347,66 @@ class DifferentialPairAutorouterTest {
       result = Math.max(result, turnDegrees(p_points[i - 1], p_points[i], p_points[i + 1]));
     }
     return result;
+  }
+
+  private static void assertSimpleOutwardBumpPattern(
+      Point[] p_points,
+      FloatPoint p_from,
+      FloatPoint p_to,
+      double p_outward_x,
+      double p_outward_y,
+      int p_bump_count,
+      double p_height,
+      double p_min_plateau,
+      double p_min_spacing,
+      double p_one_mm) {
+    double dx = p_to.x - p_from.x;
+    double dy = p_to.y - p_from.y;
+    double length = Math.sqrt(dx * dx + dy * dy);
+    double ux = dx / length;
+    double uy = dy / length;
+    double tolerance = p_one_mm * 0.02;
+
+    assertEquals((p_bump_count * 4) + 2, p_points.length);
+    double previousBaseEndAlong = Double.NaN;
+    for (int bumpIndex = 0; bumpIndex < p_bump_count; bumpIndex++) {
+      int offset = 1 + (bumpIndex * 4);
+      FloatPoint baseStart = p_points[offset].to_float();
+      FloatPoint topStart = p_points[offset + 1].to_float();
+      FloatPoint plateauEnd = p_points[offset + 2].to_float();
+      FloatPoint baseEnd = p_points[offset + 3].to_float();
+
+      double baseStartAlong = projectionAlong(baseStart, p_from, ux, uy);
+      double topStartAlong = projectionAlong(topStart, p_from, ux, uy);
+      double plateauEndAlong = projectionAlong(plateauEnd, p_from, ux, uy);
+      double baseEndAlong = projectionAlong(baseEnd, p_from, ux, uy);
+      assertTrue(baseStartAlong < topStartAlong);
+      assertTrue(topStartAlong < plateauEndAlong);
+      assertTrue(plateauEndAlong < baseEndAlong);
+      if (!Double.isNaN(previousBaseEndAlong)) {
+        assertTrue(
+            baseStartAlong - previousBaseEndAlong >= p_min_spacing - tolerance,
+            "expected self-spacing before bump " + bumpIndex);
+      }
+      previousBaseEndAlong = baseEndAlong;
+
+      assertEquals(0.0, projectionOutward(baseStart, p_from, p_outward_x, p_outward_y), tolerance);
+      assertEquals(p_height, projectionOutward(topStart, p_from, p_outward_x, p_outward_y), tolerance);
+      assertEquals(p_height, projectionOutward(plateauEnd, p_from, p_outward_x, p_outward_y), tolerance);
+      assertEquals(0.0, projectionOutward(baseEnd, p_from, p_outward_x, p_outward_y), tolerance);
+
+      assertEquals(p_height, topStartAlong - baseStartAlong, tolerance);
+      assertTrue(plateauEndAlong - topStartAlong >= p_min_plateau - tolerance);
+      assertEquals(p_height, baseEndAlong - plateauEndAlong, tolerance);
+    }
+  }
+
+  private static double projectionAlong(FloatPoint p_point, FloatPoint p_origin, double p_ux, double p_uy) {
+    return ((p_point.x - p_origin.x) * p_ux) + ((p_point.y - p_origin.y) * p_uy);
+  }
+
+  private static double projectionOutward(FloatPoint p_point, FloatPoint p_origin, double p_outward_x, double p_outward_y) {
+    return ((p_point.x - p_origin.x) * p_outward_x) + ((p_point.y - p_origin.y) * p_outward_y);
   }
 
   private static double turnDegrees(Point p_before, Point p_corner, Point p_after) {
