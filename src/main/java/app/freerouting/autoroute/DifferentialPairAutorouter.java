@@ -58,6 +58,7 @@ public class DifferentialPairAutorouter {
   private static final double PAIR_MEANDER_MAX_AMPLITUDE_MM = 3.0;
   private static final double PAIR_MEANDER_MIN_SPACING_MM = 0.60;
   private static final double PAIR_MEANDER_MIN_BUMP_WIDTH_MM = 0.80;
+  private static final double PAIR_ENDPOINT_MEANDER_ZONE_MM = 6.0;
   private static final double FLOW_THROUGH_MIN_BUMP_HEIGHT_MM = 0.20;
   private static final double FLOW_THROUGH_MAX_BUMP_HEIGHT_MM = 2.50;
   private static final double FLOW_THROUGH_MIN_BUMP_WIDTH_MM = 0.80;
@@ -1301,10 +1302,14 @@ public class DifferentialPairAutorouter {
     traces.sort(Comparator.comparingDouble(DifferentialPairAutorouter::longest_segment_length).reversed());
     Pin preferredPin = find_pin(p_shorter_member.netNo(), p_shorter_member.fromPin());
     FloatPoint preferredAnchor = preferredPin == null ? null : preferredPin.get_center().to_float();
+    boolean selectedCenterlineCorridor = lastSelectedCoupledCandidateFamily != null
+        && lastSelectedCoupledCandidateFamily.startsWith("paired_gateway_centerline");
 
     int checkedCandidates = 0;
     for (PolylineTrace trace : traces) {
-      List<PairMeanderCandidate> candidates = build_pair_meander_candidates(trace, companionTraces, p_desired_extra, preferredAnchor);
+      List<PairMeanderCandidate> candidates = selectedCenterlineCorridor
+          ? build_pair_endpoint_meander_candidates(trace, companionTraces, p_desired_extra, preferredAnchor)
+          : build_pair_meander_candidates(trace, companionTraces, p_desired_extra, preferredAnchor);
       for (PairMeanderCandidate candidate : candidates) {
         if (++checkedCandidates > MAX_CANDIDATES_PER_PASS) {
           return false;
@@ -2551,6 +2556,14 @@ public class DifferentialPairAutorouter {
     return result;
   }
 
+  private static double float_point_path_length(FloatPoint[] p_points) {
+    double result = 0.0;
+    for (int i = 0; i < p_points.length - 1; i++) {
+      result += p_points[i].distance(p_points[i + 1]);
+    }
+    return result;
+  }
+
   private static double paired_point_path_length(Point[] p_first, Point[] p_second, double p_max_center_distance) {
     double result = 0.0;
     for (int i = 0; i < p_first.length - 1; i++) {
@@ -2751,6 +2764,15 @@ public class DifferentialPairAutorouter {
           p_center_spacing,
           escapeLength + transitionLength);
       if (sourceWideGateway != null && sourceGateway != null && targetGateway != null && targetWideGateway != null) {
+        add_centerline_gateway_candidates(
+            result,
+            p_first_from.get_center().to_float(),
+            p_second_from.get_center().to_float(),
+            p_first_to.get_center().to_float(),
+            p_second_to.get_center().to_float(),
+            sourceGateway,
+            targetGateway,
+            p_center_spacing);
         add_explicit_coupled_candidate(
             result,
             new FloatPoint[] {
@@ -2950,6 +2972,362 @@ public class DifferentialPairAutorouter {
     }
 
     return result;
+  }
+
+  private void add_centerline_gateway_candidates(
+      List<CoupledCandidate> p_result,
+      FloatPoint p_first_from,
+      FloatPoint p_second_from,
+      FloatPoint p_first_to,
+      FloatPoint p_second_to,
+      Point[] p_source_gateway,
+      Point[] p_target_gateway,
+      double p_center_spacing) {
+    if (p_source_gateway.length < 2 || p_target_gateway.length < 2 || p_center_spacing <= 0.0) {
+      return;
+    }
+
+    FloatPoint sourceCenter = midpoint(p_source_gateway[0].to_float(), p_source_gateway[1].to_float());
+    FloatPoint targetCenter = midpoint(p_target_gateway[0].to_float(), p_target_gateway[1].to_float());
+    double axisX = targetCenter.x - sourceCenter.x;
+    double axisY = targetCenter.y - sourceCenter.y;
+    double axisLength = Math.sqrt(axisX * axisX + axisY * axisY);
+    if (axisLength <= p_center_spacing * 6.0) {
+      return;
+    }
+    axisX /= axisLength;
+    axisY /= axisLength;
+
+    double normalX = p_source_gateway[0].to_float().x - p_source_gateway[1].to_float().x;
+    double normalY = p_source_gateway[0].to_float().y - p_source_gateway[1].to_float().y;
+    double normalLength = Math.sqrt(normalX * normalX + normalY * normalY);
+    if (normalLength <= 0.0) {
+      normalX = p_target_gateway[0].to_float().x - p_target_gateway[1].to_float().x;
+      normalY = p_target_gateway[0].to_float().y - p_target_gateway[1].to_float().y;
+      normalLength = Math.sqrt(normalX * normalX + normalY * normalY);
+      if (normalLength <= 0.0) {
+        return;
+      }
+    }
+    normalX /= normalLength;
+    normalY /= normalLength;
+    if (side_of(p_source_gateway[0].to_float(), p_source_gateway[1].to_float(), normalX, normalY) < 0.0) {
+      normalX = -normalX;
+      normalY = -normalY;
+    }
+
+    double[] depths = {
+        mm_to_board(board, 1.2),
+        mm_to_board(board, 1.8),
+        mm_to_board(board, 2.5),
+        mm_to_board(board, 3.5),
+        mm_to_board(board, 4.5),
+    };
+    double[] ramps = {
+        mm_to_board(board, 2.0),
+        mm_to_board(board, 3.0),
+        mm_to_board(board, 4.0),
+        mm_to_board(board, 5.0),
+    };
+    for (double side : new double[] { -1.0, 1.0 }) {
+      for (double depth : depths) {
+        for (double ramp : ramps) {
+          double effectiveRamp = Math.max(ramp, depth);
+          if (effectiveRamp * 2.0 >= axisLength) {
+            continue;
+          }
+          FloatPoint entryOffset = shift_point(
+              sourceCenter,
+              axisX * effectiveRamp + normalX * side * depth,
+              axisY * effectiveRamp + normalY * side * depth);
+          FloatPoint exitOffset = shift_point(
+              targetCenter,
+              -axisX * effectiveRamp + normalX * side * depth,
+              -axisY * effectiveRamp + normalY * side * depth);
+          add_mitered_centerline_candidate(
+              p_result,
+              p_first_from,
+              p_second_from,
+              p_first_to,
+              p_second_to,
+              new FloatPoint[] { sourceCenter, entryOffset, exitOffset, targetCenter },
+              p_center_spacing,
+              "paired_gateway_centerline");
+        }
+      }
+    }
+  }
+
+  private boolean add_mitered_centerline_candidate(
+      List<CoupledCandidate> p_result,
+      FloatPoint p_first_from,
+      FloatPoint p_second_from,
+      FloatPoint p_first_to,
+      FloatPoint p_second_to,
+      FloatPoint[] p_centerline,
+      double p_center_spacing,
+      String p_family) {
+    double halfSpacing = p_center_spacing * 0.515;
+    FloatPoint[] firstBody = offset_centerline_mitered(p_centerline, halfSpacing);
+    FloatPoint[] secondBody = offset_centerline_mitered(p_centerline, -halfSpacing);
+    if (firstBody == null || secondBody == null) {
+      return false;
+    }
+    FloatPoint[] first = with_exact_endpoints(p_first_from, firstBody, p_first_to);
+    FloatPoint[] second = with_exact_endpoints(p_second_from, secondBody, p_second_to);
+    boolean added = add_unchecked_coupled_candidate(
+        p_result,
+        first,
+        second,
+        p_center_spacing,
+        p_family);
+    add_centerline_length_matched_candidates(p_result, first, second, p_center_spacing, p_family + "_matched");
+    return added;
+  }
+
+  private static boolean add_unchecked_coupled_candidate(
+      List<CoupledCandidate> p_result,
+      FloatPoint[] p_first,
+      FloatPoint[] p_second,
+      double p_center_spacing,
+      String p_family) {
+    List<Point> first = new ArrayList<>();
+    List<Point> second = new ArrayList<>();
+    for (FloatPoint point : p_first) {
+      append_distinct(first, point.round());
+    }
+    for (FloatPoint point : p_second) {
+      append_distinct(second, point.round());
+    }
+    if (first.size() < 2 || second.size() < 2) {
+      return false;
+    }
+    Point[] firstPoints = first.toArray(Point[]::new);
+    Point[] secondPoints = second.toArray(Point[]::new);
+    if (polylines_intersect(firstPoints, secondPoints)) {
+      return false;
+    }
+    p_result.add(new CoupledCandidate(firstPoints, secondPoints, p_center_spacing, p_family));
+    return true;
+  }
+
+  private void add_centerline_length_matched_candidates(
+      List<CoupledCandidate> p_result,
+      FloatPoint[] p_first,
+      FloatPoint[] p_second,
+      double p_center_spacing,
+      String p_family) {
+    double firstLength = float_point_path_length(p_first);
+    double secondLength = float_point_path_length(p_second);
+    double desiredExtra = Math.abs(firstLength - secondLength) + mm_to_board(board, 1.35);
+    if (desiredExtra <= mm_to_board(board, 0.05)) {
+      return;
+    }
+    boolean firstShorter = firstLength < secondLength;
+    FloatPoint[] shorter = firstShorter ? p_first : p_second;
+    FloatPoint[] companion = firstShorter ? p_second : p_first;
+    for (boolean sourceSide : new boolean[] { true, false }) {
+      FloatPoint[] compensated = add_local_length_bump(shorter, companion, desiredExtra, sourceSide);
+      if (compensated == null) {
+        continue;
+      }
+      add_unchecked_coupled_candidate(
+          p_result,
+          firstShorter ? compensated : p_first,
+          firstShorter ? p_second : compensated,
+          p_center_spacing,
+          p_family);
+    }
+    FloatPoint[] sourceCompensated = add_local_length_bump(shorter, companion, desiredExtra, true);
+    if (sourceCompensated != null) {
+      double remainingExtra = desiredExtra - Math.max(0.0, float_point_path_length(sourceCompensated) - float_point_path_length(shorter));
+      FloatPoint[] bothEndpointCompensated = add_local_length_bump(
+          sourceCompensated,
+          companion,
+          Math.max(mm_to_board(board, 0.05), remainingExtra),
+          false);
+      if (bothEndpointCompensated != null) {
+        add_unchecked_coupled_candidate(
+            p_result,
+            firstShorter ? bothEndpointCompensated : p_first,
+            firstShorter ? p_second : bothEndpointCompensated,
+            p_center_spacing,
+            p_family + "_both");
+      }
+    }
+  }
+
+  private FloatPoint[] add_local_length_bump(
+      FloatPoint[] p_path,
+      FloatPoint[] p_companion,
+      double p_desired_extra,
+      boolean p_source_side) {
+    if (p_path.length < 4) {
+      return null;
+    }
+    int[] segmentIndexes = p_source_side
+        ? new int[] { 0, 1 }
+        : new int[] { p_path.length - 2, p_path.length - 3 };
+    double margin = mm_to_board(board, 0.45);
+    double minHeight = mm_to_board(board, PAIR_MEANDER_MIN_AMPLITUDE_MM);
+    double maxHeight = mm_to_board(board, 1.80);
+    double minPlateau = mm_to_board(board, 0.50);
+    double spacing = mm_to_board(board, 0.45);
+    Map<Integer, FloatPoint[]> bumpsBySegment = new HashMap<>();
+    double remainingExtra = p_desired_extra;
+    for (int segmentIndex : segmentIndexes) {
+      if (segmentIndex < 0 || segmentIndex >= p_path.length - 1) {
+        continue;
+      }
+      FloatPoint from = p_path[segmentIndex];
+      FloatPoint to = p_path[segmentIndex + 1];
+      double dx = to.x - from.x;
+      double dy = to.y - from.y;
+      double segmentLength = Math.sqrt(dx * dx + dy * dy);
+      if (segmentLength <= 2.0 * margin) {
+        continue;
+      }
+      double ux = dx / segmentLength;
+      double uy = dy / segmentLength;
+      double normalX = -uy;
+      double normalY = ux;
+      FloatPoint mid = midpoint(from, to);
+      FloatPoint nearestCompanion = nearest_path_point(mid, p_companion);
+      if (nearestCompanion != null) {
+        double companionSide = ((nearestCompanion.x - mid.x) * normalX) + ((nearestCompanion.y - mid.y) * normalY);
+        if (companionSide >= 0.0) {
+          normalX = -normalX;
+          normalY = -normalY;
+        }
+      }
+      LocalBump bestBump = null;
+      for (int bumpCount : new int[] { 3, 2, 1 }) {
+        double targetHeight = Math.max(
+            minHeight,
+            Math.min(remainingExtra / (2.0 * (Math.sqrt(2.0) - 1.0) * bumpCount), maxHeight));
+        for (double height : detour_heights(targetHeight, minHeight, Math.min(maxHeight, segmentLength / 3.0))) {
+          double plateau = minPlateau;
+          double bumpLength = (2.0 * height) + plateau;
+          double span = (bumpLength * bumpCount) + (spacing * (bumpCount - 1.0));
+          if (span + (2.0 * margin) >= segmentLength) {
+            continue;
+          }
+          double startAlong = p_source_side ? margin : segmentLength - margin - span;
+          Point[] bumpPoints = angular_outward_bump_path(
+              from,
+              ux,
+              uy,
+              normalX,
+              normalY,
+              startAlong,
+              bumpCount,
+              height,
+              plateau,
+              spacing,
+              0.0);
+          if (bumpPoints != null) {
+            FloatPoint[] floatBumpPoints = float_points(bumpPoints);
+            double added = float_point_path_length(floatBumpPoints)
+                - floatBumpPoints[0].distance(floatBumpPoints[floatBumpPoints.length - 1]);
+            if (bestBump == null || Math.abs(added - remainingExtra) < Math.abs(bestBump.addedLength() - remainingExtra)) {
+              bestBump = new LocalBump(floatBumpPoints, added);
+            }
+          }
+        }
+      }
+      if (bestBump != null) {
+        bumpsBySegment.put(segmentIndex, bestBump.points());
+        remainingExtra = Math.max(0.0, remainingExtra - bestBump.addedLength());
+        if (remainingExtra <= mm_to_board(board, 0.10)) {
+          break;
+        }
+      }
+    }
+    if (bumpsBySegment.isEmpty()) {
+      return null;
+    }
+    List<FloatPoint> result = new ArrayList<>(p_path.length + (bumpsBySegment.size() * 4));
+    for (int i = 0; i < p_path.length - 1; i++) {
+      append_distinct(result, p_path[i]);
+      FloatPoint[] bumpPoints = bumpsBySegment.get(i);
+      if (bumpPoints != null) {
+        for (FloatPoint point : bumpPoints) {
+          append_distinct(result, point);
+        }
+      }
+    }
+    append_distinct(result, p_path[p_path.length - 1]);
+    return result.size() < 2 ? null : result.toArray(FloatPoint[]::new);
+  }
+
+  private static FloatPoint[] with_exact_endpoints(FloatPoint p_start, FloatPoint[] p_body, FloatPoint p_end) {
+    FloatPoint[] result = new FloatPoint[p_body.length + 2];
+    result[0] = p_start;
+    System.arraycopy(p_body, 0, result, 1, p_body.length);
+    result[result.length - 1] = p_end;
+    return result;
+  }
+
+  private static FloatPoint[] offset_centerline_mitered(FloatPoint[] p_centerline, double p_offset) {
+    if (p_centerline.length < 2) {
+      return null;
+    }
+    FloatPoint[] result = new FloatPoint[p_centerline.length];
+    for (int i = 0; i < p_centerline.length; i++) {
+      if (i == 0) {
+        FloatPoint normal = segment_normal(p_centerline[0], p_centerline[1]);
+        if (normal == null) {
+          return null;
+        }
+        result[i] = shift_point(p_centerline[i], normal.x * p_offset, normal.y * p_offset);
+      } else if (i == p_centerline.length - 1) {
+        FloatPoint normal = segment_normal(p_centerline[i - 1], p_centerline[i]);
+        if (normal == null) {
+          return null;
+        }
+        result[i] = shift_point(p_centerline[i], normal.x * p_offset, normal.y * p_offset);
+      } else {
+        FloatPoint previousNormal = segment_normal(p_centerline[i - 1], p_centerline[i]);
+        FloatPoint nextNormal = segment_normal(p_centerline[i], p_centerline[i + 1]);
+        if (previousNormal == null || nextNormal == null) {
+          return null;
+        }
+        FloatPoint previousA = shift_point(p_centerline[i - 1], previousNormal.x * p_offset, previousNormal.y * p_offset);
+        FloatPoint previousB = shift_point(p_centerline[i], previousNormal.x * p_offset, previousNormal.y * p_offset);
+        FloatPoint nextA = shift_point(p_centerline[i], nextNormal.x * p_offset, nextNormal.y * p_offset);
+        FloatPoint nextB = shift_point(p_centerline[i + 1], nextNormal.x * p_offset, nextNormal.y * p_offset);
+        FloatPoint intersection = line_intersection(previousA, previousB, nextA, nextB);
+        result[i] = intersection != null ? intersection : shift_point(
+            p_centerline[i],
+            (previousNormal.x + nextNormal.x) * p_offset * 0.5,
+            (previousNormal.y + nextNormal.y) * p_offset * 0.5);
+      }
+    }
+    return result;
+  }
+
+  private static FloatPoint line_intersection(
+      FloatPoint p_first_a,
+      FloatPoint p_first_b,
+      FloatPoint p_second_a,
+      FloatPoint p_second_b) {
+    double x1 = p_first_a.x;
+    double y1 = p_first_a.y;
+    double x2 = p_first_b.x;
+    double y2 = p_first_b.y;
+    double x3 = p_second_a.x;
+    double y3 = p_second_a.y;
+    double x4 = p_second_b.x;
+    double y4 = p_second_b.y;
+    double denominator = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(denominator) < 1e-9) {
+      return null;
+    }
+    double firstCross = x1 * y2 - y1 * x2;
+    double secondCross = x3 * y4 - y3 * x4;
+    double px = (firstCross * (x3 - x4) - (x1 - x2) * secondCross) / denominator;
+    double py = (firstCross * (y3 - y4) - (y1 - y2) * secondCross) / denominator;
+    return new FloatPoint(px, py);
   }
 
   private void add_flow_through_skew_compensated_candidates(
@@ -5568,6 +5946,119 @@ public class DifferentialPairAutorouter {
     return result;
   }
 
+  private List<PairMeanderCandidate> build_pair_endpoint_meander_candidates(
+      PolylineTrace p_trace,
+      List<PolylineTrace> p_companion_traces,
+      double p_desired_extra,
+      FloatPoint p_preferred_anchor) {
+    List<PairMeanderCandidate> result = new ArrayList<>();
+    Point[] corners = p_trace.polyline().corner_arr();
+    if (corners.length < 2 || p_desired_extra <= 0.0 || p_preferred_anchor == null) {
+      return result;
+    }
+
+    double minHeight = Math.max(
+        mm_to_board(board, PAIR_MEANDER_MIN_AMPLITUDE_MM),
+        3.0 * p_trace.get_half_width());
+    double maxHeight = Math.min(
+        mm_to_board(board, PAIR_MEANDER_MAX_AMPLITUDE_MM),
+        mm_to_board(board, 1.55));
+    double traceMargin = Math.max(
+        mm_to_board(board, PAIR_MEANDER_MIN_SPACING_MM),
+        4.0 * p_trace.get_half_width());
+    double endpointZone = mm_to_board(board, PAIR_ENDPOINT_MEANDER_ZONE_MM);
+    double minBumpWidth = Math.max(
+        mm_to_board(board, PAIR_MEANDER_MIN_BUMP_WIDTH_MM),
+        4.0 * p_trace.get_half_width());
+    double traceLength = point_path_length(corners);
+    double distanceFromTraceStart = 0.0;
+    for (int segmentIndex = 0; segmentIndex < corners.length - 1; segmentIndex++) {
+      if (!(corners[segmentIndex] instanceof IntPoint from) || !(corners[segmentIndex + 1] instanceof IntPoint to)) {
+        continue;
+      }
+      FloatPoint fromFloat = from.to_float();
+      FloatPoint toFloat = to.to_float();
+      double dx = toFloat.x - fromFloat.x;
+      double dy = toFloat.y - fromFloat.y;
+      double segmentLength = Math.sqrt(dx * dx + dy * dy);
+      if (segmentLength <= 4.0 * traceMargin) {
+        distanceFromTraceStart += segmentLength;
+        continue;
+      }
+      double distanceFromTraceEnd = traceLength - distanceFromTraceStart - segmentLength;
+      if (distanceFromTraceStart > endpointZone && distanceFromTraceEnd > endpointZone) {
+        distanceFromTraceStart += segmentLength;
+        continue;
+      }
+      double endpointAnchorDistance = Math.min(
+          fromFloat.distance(p_preferred_anchor),
+          toFloat.distance(p_preferred_anchor));
+      if (endpointAnchorDistance > endpointZone) {
+        distanceFromTraceStart += segmentLength;
+        continue;
+      }
+      FloatPoint nearestToAnchor = nearest_point_on_segment(p_preferred_anchor, fromFloat, toFloat);
+      double anchorDistance = nearestToAnchor.distance(p_preferred_anchor);
+      double projectedAnchorAlong = fromFloat.distance(nearestToAnchor);
+      double absoluteAnchorDistance = distanceFromTraceStart + projectedAnchorAlong;
+      double distanceToRouteEndpoint = Math.min(absoluteAnchorDistance, traceLength - absoluteAnchorDistance);
+      if (anchorDistance > endpointZone || distanceToRouteEndpoint > endpointZone) {
+        distanceFromTraceStart += segmentLength;
+        continue;
+      }
+
+      double usableLength = segmentLength - (2.0 * traceMargin);
+      if (usableLength <= minBumpWidth) {
+        distanceFromTraceStart += segmentLength;
+        continue;
+      }
+      double normalX = -dy / segmentLength;
+      double normalY = dx / segmentLength;
+      int companionOutwardSign = companion_outward_sign(fromFloat, toFloat, p_companion_traces, normalX, normalY);
+      double coupledOverlap = Math.max(0.0, nearby_parallel_overlap(fromFloat, toFloat, p_companion_traces));
+      int[] bumpCounts = { 3, 2, 1, 4 };
+      int[] signs = { companionOutwardSign, -companionOutwardSign };
+      for (int bumpCount : bumpCounts) {
+        if (usableLength / bumpCount < minBumpWidth) {
+          continue;
+        }
+        double angularAddedLengthPerHeight = 2.0 * (Math.sqrt(2.0) - 1.0);
+        double targetHeight = Math.max(
+            minHeight,
+            Math.min(p_desired_extra / (angularAddedLengthPerHeight * bumpCount), maxHeight));
+        double maxCandidateHeight = Math.min(maxHeight, segmentLength / Math.max(3.0, bumpCount + 1.0));
+        for (double height : detour_heights(targetHeight, minHeight, maxCandidateHeight)) {
+          for (int sign : signs) {
+            Point[] candidate = splice_endpoint_outward_meanders(
+                corners,
+                segmentIndex,
+                normalX * sign,
+                normalY * sign,
+                height,
+                bumpCount,
+                traceMargin,
+                minBumpWidth,
+                projectedAnchorAlong);
+            if (candidate != null) {
+              double addedLength = point_path_length(candidate) - point_path_length(corners);
+              result.add(new PairMeanderCandidate(
+                  candidate,
+                  addedLength,
+                  coupledOverlap,
+                  segmentLength,
+                  bumpCount,
+                  height,
+                  anchorDistance + distanceToRouteEndpoint + distanceFromTraceEnd * 0.001));
+            }
+          }
+        }
+      }
+      distanceFromTraceStart += segmentLength;
+    }
+    result.sort(Comparator.comparingDouble(candidate -> candidate.score(p_desired_extra)));
+    return result;
+  }
+
   private double nearby_parallel_overlap(
       FloatPoint p_from,
       FloatPoint p_to,
@@ -5733,6 +6224,77 @@ public class DifferentialPairAutorouter {
     return points.size() < 2 ? null : points.toArray(Point[]::new);
   }
 
+  private Point[] splice_endpoint_outward_meanders(
+      Point[] p_corners,
+      int p_segment_index,
+      double p_normal_x,
+      double p_normal_y,
+      double p_height,
+      int p_bump_count,
+      double p_margin,
+      double p_min_bump_width,
+      double p_anchor_along) {
+    IntPoint from = (IntPoint) p_corners[p_segment_index];
+    IntPoint to = (IntPoint) p_corners[p_segment_index + 1];
+    double dx = to.x - from.x;
+    double dy = to.y - from.y;
+    double segmentLength = Math.sqrt(dx * dx + dy * dy);
+    if (segmentLength <= 0.0 || p_bump_count <= 0 || p_margin * 2.0 >= segmentLength) {
+      return null;
+    }
+    double ux = dx / segmentLength;
+    double uy = dy / segmentLength;
+    double usableLength = segmentLength - (2.0 * p_margin);
+    double minPlateau = mm_to_board(board, 0.50);
+    double spacing = mm_to_board(board, 0.45);
+    double plateau = Math.max(minPlateau, p_min_bump_width - (2.0 * p_height));
+    double bumpLength = (2.0 * p_height) + plateau;
+    double meanderSpan = (bumpLength * p_bump_count) + (spacing * (p_bump_count - 1.0));
+    if (bumpLength <= 0.0 || meanderSpan > usableLength) {
+      return null;
+    }
+
+    double startAlong;
+    if (p_anchor_along <= segmentLength / 2.0) {
+      startAlong = Math.max(p_margin, p_anchor_along + p_margin);
+    } else {
+      startAlong = Math.min(segmentLength - p_margin - meanderSpan, p_anchor_along - p_margin - meanderSpan);
+    }
+    startAlong = Math.max(p_margin, Math.min(startAlong, segmentLength - p_margin - meanderSpan));
+    Point[] angular = angular_outward_bump_path(
+        from.to_float(),
+        ux,
+        uy,
+        p_normal_x,
+        p_normal_y,
+        startAlong,
+        p_bump_count,
+        p_height,
+        plateau,
+        spacing,
+        mm_to_board(board, 0.08));
+    if (angular == null) {
+      return null;
+    }
+    for (Point point : angular) {
+      if (!board.bounding_box.contains(point)) {
+        return null;
+      }
+    }
+
+    List<Point> points = new ArrayList<>(p_corners.length + angular.length);
+    for (int i = 0; i <= p_segment_index; i++) {
+      append_distinct(points, p_corners[i]);
+    }
+    for (Point point : angular) {
+      append_distinct(points, point);
+    }
+    for (int i = p_segment_index + 1; i < p_corners.length; i++) {
+      append_distinct(points, p_corners[i]);
+    }
+    return points.size() < 2 ? null : points.toArray(Point[]::new);
+  }
+
   private static Point[] angular_outward_bump_path(
       FloatPoint p_segment_from,
       double p_axis_x,
@@ -5843,6 +6405,38 @@ public class DifferentialPairAutorouter {
     if (p_points.isEmpty() || !p_points.get(p_points.size() - 1).equals(p_point)) {
       p_points.add(p_point);
     }
+  }
+
+  private static void append_distinct(List<FloatPoint> p_points, FloatPoint p_point) {
+    if (p_points.isEmpty() || p_points.get(p_points.size() - 1).distance(p_point) > 0.01) {
+      p_points.add(p_point);
+    }
+  }
+
+  private static FloatPoint nearest_point_on_segment(FloatPoint p_point, FloatPoint p_from, FloatPoint p_to) {
+    double dx = p_to.x - p_from.x;
+    double dy = p_to.y - p_from.y;
+    double lengthSquared = (dx * dx) + (dy * dy);
+    if (lengthSquared <= 0.0) {
+      return p_from;
+    }
+    double t = ((p_point.x - p_from.x) * dx + ((p_point.y - p_from.y) * dy)) / lengthSquared;
+    t = Math.max(0.0, Math.min(1.0, t));
+    return new FloatPoint(p_from.x + (dx * t), p_from.y + (dy * t));
+  }
+
+  private static FloatPoint nearest_path_point(FloatPoint p_point, FloatPoint[] p_path) {
+    FloatPoint result = null;
+    double bestDistance = Double.POSITIVE_INFINITY;
+    for (int i = 0; i < p_path.length - 1; i++) {
+      FloatPoint candidate = nearest_point_on_segment(p_point, p_path[i], p_path[i + 1]);
+      double distance = candidate.distance_square(p_point);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        result = candidate;
+      }
+    }
+    return result;
   }
 
   private List<PolylineTrace> collect_unfixed_traces(PairMemberMeasurement p_member) {
@@ -6563,6 +7157,9 @@ public class DifferentialPairAutorouter {
       double normalY,
       double coupledOverlap,
       double anchorDistance) {
+  }
+
+  private record LocalBump(FloatPoint[] points, double addedLength) {
   }
 
   private record FlowThroughBumpCandidate(
