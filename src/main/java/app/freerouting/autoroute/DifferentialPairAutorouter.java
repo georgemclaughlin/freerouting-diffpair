@@ -59,6 +59,8 @@ public class DifferentialPairAutorouter {
   private static final double PAIR_MEANDER_MIN_SPACING_MM = 0.60;
   private static final double PAIR_MEANDER_MIN_BUMP_WIDTH_MM = 0.80;
   private static final double PAIR_ENDPOINT_MEANDER_ZONE_MM = 6.0;
+  private static final double CENTERLINE_OFFSET_ROUNDING_ALLOWANCE_MM = 0.0;
+  private static final double CENTERLINE_LENGTH_MATCH_ROUNDING_BIAS_MM = 1.35;
   private static final double FLOW_THROUGH_MIN_BUMP_HEIGHT_MM = 0.20;
   private static final double FLOW_THROUGH_MAX_BUMP_HEIGHT_MM = 2.50;
   private static final double FLOW_THROUGH_MIN_BUMP_WIDTH_MM = 0.80;
@@ -67,9 +69,9 @@ public class DifferentialPairAutorouter {
   private static final double FLOW_THROUGH_MAX_RAMP_ANGLE_ERROR_DEG = 8.0;
   private static final double FLOW_THROUGH_MAX_BEND_ANGLE_DEG = 60.0;
   private static final double FLOW_THROUGH_MAX_ROUNDED_SEGMENT_ANGLE_DEG = 67.5;
-  private static final double FLOW_THROUGH_MAX_ROUNDED_TURN_DEG = 45.0;
-  private static final double FLOW_THROUGH_KICAD_CORNER_RADIUS_PERCENT = 80.0;
+  private static final double FLOW_THROUGH_MAX_ROUNDED_TURN_DEG = 60.0;
   private static final int FLOW_THROUGH_ROUNDED_RAMP_SAMPLES = 12;
+  private static final double FLOW_THROUGH_KICAD_CORNER_RADIUS_PERCENT = 80.0;
 
   private final RoutingJob job;
   private final RoutingBoard board;
@@ -326,13 +328,12 @@ public class DifferentialPairAutorouter {
         && baselineParallelRatio >= minParallelLengthRatio
         && uncoupled_length_is_within_limit(baselineUncoupledLength, maxUncoupledLength)) {
       logInfo(String.format(Locale.US,
-          "Differential pair %s kept existing coupled route because it already satisfies route intent: parallel ratio %.3f, uncoupled %.3f mm, skew %.3f mm, gap %.3f mm.",
+          "Differential pair %s already satisfies route intent before replacement search: parallel ratio %.3f, uncoupled %.3f mm, skew %.3f mm, gap %.3f mm.",
           pairName,
           baselineParallelRatio,
           board_to_mm(board, baselineUncoupledLength),
           board_to_mm(board, beforeSkew),
           board_to_mm(board, baselineGap)));
-      return 0;
     }
 
     List<CoupledCandidate> candidates = new ArrayList<>();
@@ -583,6 +584,9 @@ public class DifferentialPairAutorouter {
     Map<String, Integer> rejectedFamilies = new HashMap<>();
     int evaluatedCandidateCount = 0;
     for (CoupledCandidate candidate : candidates) {
+      if (is_post_route_only_candidate(candidate)) {
+        continue;
+      }
       evaluatedCandidateCount++;
       CoupledCandidateEvaluation evaluation = evaluate_insert_pair_routes(
           p_pair,
@@ -1012,6 +1016,9 @@ public class DifferentialPairAutorouter {
     Map<String, Integer> rejectedFamilies = new HashMap<>();
     int evaluatedCandidateCount = 0;
     for (CoupledCandidate candidate : candidates) {
+      if (is_post_route_only_candidate(candidate)) {
+        continue;
+      }
       evaluatedCandidateCount++;
       CoupledCandidateEvaluation evaluation = evaluate_insert_pair_routes(
           p_pair,
@@ -1157,6 +1164,10 @@ public class DifferentialPairAutorouter {
       result.merge(candidate.family(), 1, Integer::sum);
     }
     return result;
+  }
+
+  private static boolean is_post_route_only_candidate(CoupledCandidate p_candidate) {
+    return p_candidate.family().startsWith("flow_through_");
   }
 
   private static boolean coupled_candidate_is_preferred(
@@ -1486,12 +1497,22 @@ public class DifferentialPairAutorouter {
             || afterGap >= p_min_pair_gap
             || afterGap > p_baseline_gap)
         && skew <= beforeSkew;
+    boolean shapeImprovement = p_candidate.family().startsWith("flow_through_")
+        && after.scoped()
+        && skew <= Math.max(maxSkewBoard, beforeSkew)
+        && (Double.isNaN(afterGap) || afterGap >= p_min_pair_gap)
+        && (Double.isNaN(afterGap) || afterGap <= p_max_pair_gap)
+        && afterClearanceViolations <= p_max_clearance_violations;
     boolean allowMonotonicCommit = !p_candidate.family().startsWith("flow_through_");
-    if (fullyPassing || (allowMonotonicCommit && monotonicImprovement)) {
+    if (fullyPassing || shapeImprovement || (allowMonotonicCommit && monotonicImprovement)) {
       CoupledCandidateEvaluation evaluation = new CoupledCandidateEvaluation(
           p_candidate,
           true,
-          fullyPassing ? "accepted" : "accepted as strict-safe monotonic improvement",
+          fullyPassing
+              ? "accepted"
+              : shapeImprovement
+                  ? "accepted as strict-safe shape improvement"
+                  : "accepted as strict-safe monotonic improvement",
           skew,
           afterGap,
           afterParallelLength,
@@ -3067,7 +3088,7 @@ public class DifferentialPairAutorouter {
       FloatPoint[] p_centerline,
       double p_center_spacing,
       String p_family) {
-    double halfSpacing = p_center_spacing * 0.515;
+    double halfSpacing = centerline_half_spacing(p_center_spacing);
     FloatPoint[] firstBody = offset_centerline_mitered(p_centerline, halfSpacing);
     FloatPoint[] secondBody = offset_centerline_mitered(p_centerline, -halfSpacing);
     if (firstBody == null || secondBody == null) {
@@ -3119,7 +3140,8 @@ public class DifferentialPairAutorouter {
       String p_family) {
     double firstLength = float_point_path_length(p_first);
     double secondLength = float_point_path_length(p_second);
-    double desiredExtra = Math.abs(firstLength - secondLength) + mm_to_board(board, 1.35);
+    double desiredExtra = Math.abs(firstLength - secondLength)
+        + mm_to_board(board, CENTERLINE_LENGTH_MATCH_ROUNDING_BIAS_MM);
     if (desiredExtra <= mm_to_board(board, 0.05)) {
       return;
     }
@@ -3258,6 +3280,10 @@ public class DifferentialPairAutorouter {
     }
     append_distinct(result, p_path[p_path.length - 1]);
     return result.size() < 2 ? null : result.toArray(FloatPoint[]::new);
+  }
+
+  private double centerline_half_spacing(double p_center_spacing) {
+    return (p_center_spacing / 2.0) + mm_to_board(board, CENTERLINE_OFFSET_ROUNDING_ALLOWANCE_MM);
   }
 
   private static FloatPoint[] with_exact_endpoints(FloatPoint p_start, FloatPoint[] p_body, FloatPoint p_end) {
@@ -3575,6 +3601,83 @@ public class DifferentialPairAutorouter {
         p_near_target).size();
   }
 
+  List<CenterlineCandidateSummary> centerline_gateway_candidate_summaries_for_test(
+      FloatPoint p_first_from,
+      FloatPoint p_second_from,
+      FloatPoint p_first_to,
+      FloatPoint p_second_to,
+      double p_center_spacing,
+      double p_escape_length) {
+    Point[] sourceGateway = paired_gateway_escape_points(
+        p_first_from,
+        p_second_from,
+        p_first_to,
+        p_second_to,
+        true,
+        p_center_spacing,
+        p_escape_length);
+    Point[] targetGateway = paired_gateway_escape_points(
+        p_first_from,
+        p_second_from,
+        p_first_to,
+        p_second_to,
+        false,
+        p_center_spacing,
+        p_escape_length);
+    if (sourceGateway == null || targetGateway == null) {
+      return List.of();
+    }
+    List<CoupledCandidate> candidates = new ArrayList<>();
+    add_centerline_gateway_candidates(
+        candidates,
+        p_first_from,
+        p_second_from,
+        p_first_to,
+        p_second_to,
+        sourceGateway,
+        targetGateway,
+        p_center_spacing);
+    List<CenterlineCandidateSummary> result = new ArrayList<>();
+    for (CoupledCandidate candidate : candidates) {
+      result.add(new CenterlineCandidateSummary(
+          candidate.family(),
+          point_path_length(candidate.first()),
+          point_path_length(candidate.second()),
+          Math.abs(point_path_length(candidate.first()) - point_path_length(candidate.second())),
+          nearest_polyline_distance(candidate.first(), candidate.second())));
+    }
+    return result;
+  }
+
+  List<CenterlineCandidateSummary> centerline_candidate_summaries_for_test(
+      FloatPoint p_first_from,
+      FloatPoint p_second_from,
+      FloatPoint p_first_to,
+      FloatPoint p_second_to,
+      FloatPoint[] p_centerline,
+      double p_center_spacing) {
+    List<CoupledCandidate> candidates = new ArrayList<>();
+    add_mitered_centerline_candidate(
+        candidates,
+        p_first_from,
+        p_second_from,
+        p_first_to,
+        p_second_to,
+        p_centerline,
+        p_center_spacing,
+        "paired_gateway_centerline");
+    List<CenterlineCandidateSummary> result = new ArrayList<>();
+    for (CoupledCandidate candidate : candidates) {
+      result.add(new CenterlineCandidateSummary(
+          candidate.family(),
+          point_path_length(candidate.first()),
+          point_path_length(candidate.second()),
+          Math.abs(point_path_length(candidate.first()) - point_path_length(candidate.second())),
+          nearest_polyline_distance(candidate.first(), candidate.second())));
+    }
+    return result;
+  }
+
   int max_fit_flow_through_bump_count_for_test(
       FloatPoint p_from,
       FloatPoint p_to,
@@ -3803,40 +3906,29 @@ public class DifferentialPairAutorouter {
     double uy = dy / length;
     double margin = Math.max(mm_to_board(board, 0.30), p_spacing * 0.50);
     double[] widths = new double[p_heights.length];
-    double[] fillets = new double[p_heights.length];
     double totalSpan = (p_heights.length - 1.0) * p_spacing;
     for (int i = 0; i < p_heights.length; i++) {
       double height = p_heights[i];
       double width = Math.max(p_min_bump_width, rounded_bump_width(height, p_min_plateau, p_spacing));
-      double fillet = rounded_bump_fillet(height, p_min_plateau, p_spacing);
       double plateau = width - (height * 2.0);
       if (!Double.isFinite(width)
-          || !Double.isFinite(fillet)
           || height <= 0.0
-          || plateau < p_min_plateau
-          || plateau - (2.0 * fillet) < p_min_plateau) {
+          || plateau < p_min_plateau) {
         return null;
       }
       widths[i] = width;
-      fillets[i] = fillet;
       totalSpan += width;
     }
     if (totalSpan + margin * 2.0 >= length) {
       return null;
     }
     double startDistance = p_near_target ? length - margin - totalSpan : margin;
-    double rampScale = 1.0 / Math.sqrt(2.0);
-    double rampUpX = (ux + p_outward_x) * rampScale;
-    double rampUpY = (uy + p_outward_y) * rampScale;
-    double rampDownX = (ux - p_outward_x) * rampScale;
-    double rampDownY = (uy - p_outward_y) * rampScale;
     List<Point> points = new ArrayList<>();
     append_distinct(points, p_from.round());
     double bumpStart = startDistance;
     for (int i = 0; i < p_heights.length; i++) {
       double height = p_heights[i];
       double width = widths[i];
-      double fillet = fillets[i];
       double bumpEnd = bumpStart + width;
       FloatPoint baseStart = shift_point(p_from, ux * bumpStart, uy * bumpStart);
       FloatPoint topStart = shift_point(
@@ -3848,14 +3940,10 @@ public class DifferentialPairAutorouter {
           ux * (bumpEnd - height) + p_outward_x * height,
           uy * (bumpEnd - height) + p_outward_y * height);
       FloatPoint baseEnd = shift_point(p_from, ux * bumpEnd, uy * bumpEnd);
-      append_distinct(points, shift_point(baseStart, -ux * fillet, -uy * fillet).round());
-      append_rounded_corner(points, baseStart, ux, uy, rampUpX, rampUpY, fillet);
-      append_distinct(points, shift_point(topStart, -rampUpX * fillet, -rampUpY * fillet).round());
-      append_rounded_corner(points, topStart, rampUpX, rampUpY, ux, uy, fillet);
-      append_distinct(points, shift_point(plateauEnd, -ux * fillet, -uy * fillet).round());
-      append_rounded_corner(points, plateauEnd, ux, uy, rampDownX, rampDownY, fillet);
-      append_distinct(points, shift_point(baseEnd, -rampDownX * fillet, -rampDownY * fillet).round());
-      append_rounded_corner(points, baseEnd, rampDownX, rampDownY, ux, uy, fillet);
+      append_distinct(points, baseStart.round());
+      append_distinct(points, topStart.round());
+      append_distinct(points, plateauEnd.round());
+      append_distinct(points, baseEnd.round());
       bumpStart = bumpEnd + p_spacing;
     }
     append_distinct(points, p_to.round());
@@ -7160,6 +7248,14 @@ public class DifferentialPairAutorouter {
   }
 
   private record LocalBump(FloatPoint[] points, double addedLength) {
+  }
+
+  record CenterlineCandidateSummary(
+      String family,
+      double firstLength,
+      double secondLength,
+      double skew,
+      double gap) {
   }
 
   private record FlowThroughBumpCandidate(

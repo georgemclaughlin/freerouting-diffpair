@@ -177,7 +177,7 @@ class DifferentialPairAutorouterTest {
         rawSpacing,
         false);
     assertNotNull(rounded);
-    assertTrue(rounded.length > 20, "expected sampled rounded corners");
+    assertEquals(10, rounded.length, "expected two simple 45-degree plateau bumps");
     assertTrue(autorouter.valid_flow_through_bump_shape_for_test(
         rounded,
         from,
@@ -259,6 +259,39 @@ class DifferentialPairAutorouterTest {
         true);
 
     assertTrue(candidateCount > 0, "expected deterministic outward bump candidates");
+  }
+
+  @Test
+  void centerlineGatewayCandidateProducesCaseSixStyleEndpointCompensation() throws Exception {
+    RoutingBoard board = loadBoard(TWO_NET_PAIR_DSN);
+    double oneMm = board.communication.get_resolution(Unit.MM);
+    DifferentialPairAutorouter autorouter = new DifferentialPairAutorouter(null, board, 1.0);
+
+    var summaries = autorouter.centerline_candidate_summaries_for_test(
+        new FloatPoint(86.0 * oneMm, 100.6 * oneMm),
+        new FloatPoint(82.0 * oneMm, 99.4 * oneMm),
+        new FloatPoint(122.0 * oneMm, 100.6 * oneMm),
+        new FloatPoint(122.0 * oneMm, 99.4 * oneMm),
+        new FloatPoint[] {
+            new FloatPoint(88.0 * oneMm, 100.0 * oneMm),
+            new FloatPoint(93.0 * oneMm, 101.8 * oneMm),
+            new FloatPoint(113.0 * oneMm, 101.8 * oneMm),
+            new FloatPoint(118.0 * oneMm, 100.0 * oneMm),
+        },
+        1.0 * oneMm);
+
+    DifferentialPairAutorouter.CenterlineCandidateSummary bestMatchedBoth = summaries.stream()
+        .filter(summary -> summary.family().equals("paired_gateway_centerline_matched_both"))
+        .min((left, right) -> Double.compare(left.skew(), right.skew()))
+        .orElseThrow(() -> new AssertionError("expected matched-both centerline candidates, got " + summaries));
+
+    assertTrue(
+        bestMatchedBoth.skew() <= 1.0 * oneMm,
+        "expected local endpoint compensation to reduce centerline skew below 1 mm, got "
+            + (bestMatchedBoth.skew() / oneMm) + " mm");
+    assertTrue(
+        bestMatchedBoth.gap() >= 0.9 * oneMm && bestMatchedBoth.gap() <= 1.2 * oneMm,
+        "expected centerline gap near 1 mm, got " + (bestMatchedBoth.gap() / oneMm) + " mm");
   }
 
   private static double maxTraceTurnDegrees(RoutingBoard p_board, int p_net_no) {
