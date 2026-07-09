@@ -1,6 +1,7 @@
 package app.freerouting.autoroute;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -90,7 +91,7 @@ class RouterIntentRoutingPolicyTest {
   }
 
   @Test
-  void traceCostForLayerAppliesProhibitiveCostForHardPairLayerViolation() {
+  void layerAllowedRejectsHardPairLayerViolation() {
     RouterIntentSettings intent = intentWith(
         netIntent(
             "USB_D_PLUS",
@@ -104,14 +105,9 @@ class RouterIntentRoutingPolicyTest {
     AutorouteControl.ExpansionCostFactor base = new AutorouteControl.ExpansionCostFactor(2.0, 3.0);
 
     assertSame(base, RouterIntentRoutingPolicy.traceCostForLayer(intent, "USB_D_PLUS", "F.Cu", base));
-    AutorouteControl.ExpansionCostFactor forbidden = RouterIntentRoutingPolicy.traceCostForLayer(
-        intent,
-        "USB_D_PLUS",
-        "In1.Cu",
-        base);
-
-    assertTrue(forbidden.horizontal > 1_000_000.0);
-    assertTrue(forbidden.vertical > 1_000_000.0);
+    assertTrue(RouterIntentRoutingPolicy.layerAllowed(intent, "USB_D_PLUS", "F.Cu"));
+    assertFalse(RouterIntentRoutingPolicy.layerAllowed(intent, "USB_D_PLUS", "In1.Cu"));
+    assertTrue(RouterIntentRoutingPolicy.layerAllowed(intent, "VBUS", "In1.Cu"));
   }
 
   @Test
@@ -205,7 +201,7 @@ class RouterIntentRoutingPolicyTest {
   }
 
   @Test
-  void viaCostFactorAppliesProhibitiveCostForHardNoViaPairMembers() {
+  void viasAllowedRejectsHardNoViaPairMembers() {
     RouterIntentSettings intent = intentWith(
         netIntent(
             "USB_D_PLUS",
@@ -216,7 +212,9 @@ class RouterIntentRoutingPolicyTest {
     pair.maxViasPerNet = 0;
     intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
 
-    assertTrue(RouterIntentRoutingPolicy.viaCostFactor(intent, "USB_D_PLUS") > 1_000_000.0);
+    assertFalse(RouterIntentRoutingPolicy.viasAllowed(intent, "USB_D_PLUS"));
+    assertTrue(Double.isInfinite(RouterIntentRoutingPolicy.viaCostFactor(intent, "USB_D_PLUS")));
+    assertTrue(RouterIntentRoutingPolicy.viasAllowed(intent, "VBUS"));
     assertEquals(1.0, RouterIntentRoutingPolicy.viaCostFactor(intent, "VBUS"));
   }
 

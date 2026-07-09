@@ -427,6 +427,10 @@ public class InsertFoundConnectionAlgo {
     if (p_from_layer == p_to_layer) {
       return true; // no via necessary
     }
+    if (!ctrl.vias_allowed || !RouterIntentRoutingPolicy.viasAllowed(ctrl.settings.intent, ctrl.router_intent_net_name)) {
+      FRLogger.debug("InsertFoundConnectionAlgo: via rejected by router intent for net #" + ctrl.net_no);
+      return false;
+    }
     int from_layer;
     int to_layer;
     // sort the input layers

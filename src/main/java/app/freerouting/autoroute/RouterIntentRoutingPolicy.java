@@ -3,7 +3,6 @@ package app.freerouting.autoroute;
 import app.freerouting.settings.RouterIntentSettings;
 
 final class RouterIntentRoutingPolicy {
-  private static final double HARD_CONSTRAINT_COST_FACTOR = 1_000_000_000.0;
   private static final double NON_PREFERRED_LAYER_COST_FACTOR = 4.0;
   private static final double CRITICAL_NET_VIA_COST_FACTOR = 1.5;
   private static final double LOCAL_SUPPORT_VIA_COST_FACTOR = 1.2;
@@ -47,13 +46,6 @@ final class RouterIntentRoutingPolicy {
       String netName,
       String layerName,
       AutorouteControl.ExpansionCostFactor base) {
-    if (intent != null
-        && base != null
-        && !intent.isHardDifferentialPairLayerForNet(netName, layerName)) {
-      return new AutorouteControl.ExpansionCostFactor(
-          base.horizontal * HARD_CONSTRAINT_COST_FACTOR,
-          base.vertical * HARD_CONSTRAINT_COST_FACTOR);
-    }
     if (intent == null || base == null || !intent.hasPreferredLayerIntent(netName)
         || intent.isPreferredLayerForNet(netName, layerName)) {
       return base;
@@ -87,6 +79,14 @@ final class RouterIntentRoutingPolicy {
       default -> 1.0;
     };
     return ripupFactor * differentialPairViaCostFactor(intent, netName);
+  }
+
+  static boolean layerAllowed(RouterIntentSettings intent, String netName, String layerName) {
+    return intent == null || intent.isHardDifferentialPairLayerForNet(netName, layerName);
+  }
+
+  static boolean viasAllowed(RouterIntentSettings intent, String netName) {
+    return intent == null || !intent.forbidsViasForDifferentialPairNet(netName);
   }
 
   static double ripupCostFactor(RouterIntentSettings intent, String netName) {
@@ -131,7 +131,7 @@ final class RouterIntentRoutingPolicy {
 
   private static double differentialPairViaCostFactor(RouterIntentSettings intent, String netName) {
     if (intent != null && intent.forbidsViasForDifferentialPairNet(netName)) {
-      return HARD_CONSTRAINT_COST_FACTOR;
+      return Double.POSITIVE_INFINITY;
     }
     return intent != null && intent.differentialPairSiblingNetForNet(netName) != null
         ? DIFFERENTIAL_PAIR_EXTRA_VIA_COST_FACTOR

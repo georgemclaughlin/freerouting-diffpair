@@ -230,6 +230,13 @@ public class AutorouteControl {
       if (curr_net_class != null && !curr_net_class.is_active_routing_layer(i)) {
         layer_active[i] = false;
       }
+      String layerName = p_board.layer_structure.arr[i].name;
+      if (!RouterIntentRoutingPolicy.layerAllowed(this.settings.intent, router_intent_net_name, layerName)) {
+        layer_active[i] = false;
+      }
+    }
+    if (!RouterIntentRoutingPolicy.viasAllowed(this.settings.intent, router_intent_net_name)) {
+      vias_allowed = false;
     }
     if (via_rule.via_count() > 0) {
       this.via_clearance_class = via_rule.get_via(0).get_clearance_class();

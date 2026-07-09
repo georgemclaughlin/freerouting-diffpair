@@ -442,10 +442,24 @@ tasks.register('buildDockerImage', Exec) {
     commandLine 'docker', 'build', '-t', 'freerouting/freerouting:2.0.1', '.'
 }
 
-tasks.register('installLocalGitHook', Copy) {
-    from new File(rootProject.rootDir, 'scripts/pre-commit')
-    into { new File(rootProject.rootDir, '.git/hooks') }
-    fileMode 0775
+tasks.register('installLocalGitHook') {
+    group = 'build setup'
+    description = 'Installs the local pre-commit hook into the active Git hooks directory.'
+
+    doLast {
+        def hookSource = new File(rootProject.rootDir, 'scripts/pre-commit')
+        def gitPathOutput = new ByteArrayOutputStream()
+        exec {
+            workingDir rootProject.rootDir
+            commandLine 'git', 'rev-parse', '--git-path', 'hooks'
+            standardOutput = gitPathOutput
+        }
+        def hooksDir = new File(rootProject.rootDir, gitPathOutput.toString().trim())
+        hooksDir.mkdirs()
+        def hookTarget = new File(hooksDir, 'pre-commit')
+        hookTarget.bytes = hookSource.bytes
+        hookTarget.setExecutable(true, false)
+    }
 }
 
 test {
