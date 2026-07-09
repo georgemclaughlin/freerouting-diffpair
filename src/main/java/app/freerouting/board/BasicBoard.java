@@ -9,6 +9,7 @@ import app.freerouting.datastructures.ShapeTree.TreeEntry;
 import app.freerouting.datastructures.UndoableObjects;
 import app.freerouting.geometry.planar.Area;
 import app.freerouting.geometry.planar.ConvexShape;
+import app.freerouting.geometry.planar.FloatPoint;
 import app.freerouting.geometry.planar.IntBox;
 import app.freerouting.geometry.planar.IntOctagon;
 import app.freerouting.geometry.planar.Point;
@@ -28,9 +29,11 @@ import java.io.Serializable;
 import java.security.MessageDigest;
 import java.util.Collection;
 import java.util.ConcurrentModificationException;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.Map;
 import java.util.Set;
 import java.util.SortedSet;
 import java.util.TreeSet;
@@ -843,7 +846,7 @@ public class BasicBoard implements Serializable {
         FRLogger.warn("BasicBoard.normalize_traces: reached " + MAX_NORMALIZE_ITERATIONS
             + " iterations for net '" + netName + "' — stopping to prevent hang."
             + " The board geometry for this net may be oscillating (split/combine cycle);"
-            + " traces are kept as-is.");
+            + " traces are kept as-is. " + normalizeTraceDiagnostics(p_net_no));
         break;
       }
       something_changed = false;
@@ -871,6 +874,94 @@ public class BasicBoard implements Serializable {
       }
     }
     return result;
+  }
+
+  private String normalizeTraceDiagnostics(int p_net_no) {
+    int traceCount = 0;
+    int degenerateCount = 0;
+    double totalLength = 0.0;
+    Map<Integer, Integer> layerCounts = new HashMap<>();
+    StringBuilder sample = new StringBuilder();
+
+    Iterator<UndoableObjects.UndoableObjectNode> it = item_list.start_read_object();
+    for (;;) {
+      UndoableObjects.Storable currObject = item_list.read_object(it);
+      if (currObject == null) {
+        break;
+      }
+      if (currObject instanceof PolylineTrace trace
+          && trace.contains_net(p_net_no)
+          && trace.is_on_the_board()) {
+        traceCount++;
+        totalLength += trace.get_length();
+        layerCounts.merge(trace.get_layer(), 1, Integer::sum);
+        if (trace.corner_count() == 2 && trace.first_corner().equals(trace.last_corner())) {
+          degenerateCount++;
+        }
+        if (traceCount <= 8) {
+          if (!sample.isEmpty()) {
+            sample.append("; ");
+          }
+          sample.append('#')
+              .append(trace.get_id_no())
+              .append("@")
+              .append(layerName(trace.get_layer()))
+              .append("[corners=")
+              .append(trace.corner_count())
+              .append(",fixed=")
+              .append(trace.get_fixed_state())
+              .append(",from=")
+              .append(pointSummary(trace.first_corner()))
+              .append(",to=")
+              .append(pointSummary(trace.last_corner()))
+              .append(']');
+        }
+      }
+    }
+
+    return "trace_count=" + traceCount
+        + ", degenerate_trace_count=" + degenerateCount
+        + ", total_length=" + FRLogger.defaultFloatFormat.format(totalLength)
+        + ", layers=" + layerCountSummary(layerCounts)
+        + ", sample=" + (sample.isEmpty() ? "[]" : sample);
+  }
+
+  private String layerCountSummary(Map<Integer, Integer> p_layer_counts) {
+    if (p_layer_counts.isEmpty()) {
+      return "{}";
+    }
+    StringBuilder result = new StringBuilder("{");
+    boolean first = true;
+    for (Map.Entry<Integer, Integer> entry : p_layer_counts.entrySet()) {
+      if (!first) {
+        result.append(", ");
+      }
+      result.append(layerName(entry.getKey())).append('=').append(entry.getValue());
+      first = false;
+    }
+    result.append('}');
+    return result.toString();
+  }
+
+  private String layerName(int p_layer) {
+    return layer_structure != null
+        && layer_structure.arr != null
+        && p_layer >= 0
+        && p_layer < layer_structure.arr.length
+        ? layer_structure.arr[p_layer].name
+        : Integer.toString(p_layer);
+  }
+
+  private String pointSummary(Point p_point) {
+    if (p_point == null) {
+      return "null";
+    }
+    FloatPoint approx = p_point.to_float();
+    return "("
+        + FRLogger.defaultFloatFormat.format(approx.x)
+        + ","
+        + FRLogger.defaultFloatFormat.format(approx.y)
+        + ")";
   }
 
   /**
