@@ -13,6 +13,28 @@ import org.junit.jupiter.api.Test;
 class RouterIntentRoutingPolicyTest {
 
   @Test
+  void compareNetNamesRoutesHigherRouteOrderRankFirst() {
+    RouterIntentSettings.NetIntent critical = netIntent(
+        "CRITICAL_3V3",
+        RouterIntentSettings.Priority.CRITICAL,
+        RouterIntentSettings.Scope.GLOBAL,
+        RouterIntentSettings.RipupProtection.CRITICAL,
+        "F.Cu");
+    critical.routeOrderRank = 10;
+    RouterIntentSettings.NetIntent earlySignal = netIntent(
+        "USB_D_PLUS",
+        RouterIntentSettings.Priority.NORMAL,
+        RouterIntentSettings.Scope.NORMAL,
+        RouterIntentSettings.RipupProtection.NONE,
+        "F.Cu");
+    earlySignal.routeOrderRank = 90;
+    RouterIntentSettings intent = intentWith(critical, earlySignal);
+
+    assertTrue(RouterIntentRoutingPolicy.compareNetNames(intent, "USB_D_PLUS", "CRITICAL_3V3") < 0);
+    assertTrue(RouterIntentRoutingPolicy.compareNetNames(intent, "CRITICAL_3V3", "USB_D_PLUS") > 0);
+  }
+
+  @Test
   void compareNetNamesRoutesCriticalThenLocalThenProtectedNetsFirst() {
     RouterIntentSettings intent = intentWith(
         netIntent(

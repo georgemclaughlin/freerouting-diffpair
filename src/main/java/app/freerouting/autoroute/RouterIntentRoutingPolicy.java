@@ -23,6 +23,11 @@ final class RouterIntentRoutingPolicy {
   }
 
   static int compareNetNames(RouterIntentSettings intent, String leftNetName, String rightNetName) {
+    int routeOrderCompare = Integer.compare(routeOrderRank(intent, rightNetName), routeOrderRank(intent, leftNetName));
+    if (routeOrderCompare != 0) {
+      return routeOrderCompare;
+    }
+
     int priorityCompare = Integer.compare(priorityRank(intent, rightNetName), priorityRank(intent, leftNetName));
     if (priorityCompare != 0) {
       return priorityCompare;
@@ -140,6 +145,10 @@ final class RouterIntentRoutingPolicy {
 
   private static int priorityRank(RouterIntentSettings intent, String netName) {
     return intent == null ? 0 : intent.priorityRankForNet(netName);
+  }
+
+  private static int routeOrderRank(RouterIntentSettings intent, String netName) {
+    return intent == null ? 0 : intent.routeOrderRankForNet(netName);
   }
 
   private static int scopeRank(RouterIntentSettings intent, String netName) {
