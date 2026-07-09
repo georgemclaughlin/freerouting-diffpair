@@ -38,6 +38,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -312,6 +313,7 @@ public class BatchAutorouter extends NamedAlgorithm {
       return;
     }
     autorouteItems.sort(this::compareRouterIntentItems);
+    logRouterIntentOrder(autorouteItems, intent);
   }
 
   private int compareRouterIntentItems(Item left, Item right) {
@@ -331,6 +333,38 @@ public class BatchAutorouter extends NamedAlgorithm {
       }
     }
     return bestNetName;
+  }
+
+  private void logRouterIntentOrder(List<Item> autorouteItems, RouterIntentSettings intent) {
+    LinkedHashSet<String> orderedNets = new LinkedHashSet<>();
+    for (Item item : autorouteItems) {
+      String netName = routerIntentPrimaryNetName(item);
+      if (netName != null) {
+        orderedNets.add(netName);
+      }
+    }
+    if (orderedNets.isEmpty()) {
+      return;
+    }
+
+    StringBuilder message = new StringBuilder("Router intent route order:");
+    int count = 0;
+    for (String netName : orderedNets) {
+      if (count > 0) {
+        message.append(',');
+      }
+      message.append(' ')
+          .append(netName)
+          .append("(route_order_rank=")
+          .append(intent.routeOrderRankForNet(netName))
+          .append(')');
+      count++;
+      if (count >= 16 && orderedNets.size() > count) {
+        message.append(", ...");
+        break;
+      }
+    }
+    FRLogger.info(message.toString());
   }
 
   private String netName(int netNo) {
