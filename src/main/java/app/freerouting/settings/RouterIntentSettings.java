@@ -18,7 +18,7 @@ import java.util.Set;
 
 public class RouterIntentSettings implements Serializable, Cloneable {
   private static final String SCHEMA = "kicad-agent-router-intent";
-  private static final int SCHEMA_VERSION = 5;
+  private static final int SCHEMA_VERSION = 6;
   private static final Set<String> TOP_LEVEL_KEYS = Set.of(
       "schema",
       "schema_version",
@@ -39,8 +39,10 @@ public class RouterIntentSettings implements Serializable, Cloneable {
   private static final Set<String> SETTINGS_RIPUP_PROTECTION_VALUES = Set.of("source_copper_and_critical");
   private static final Set<String> NET_INTENT_KEYS = Set.of(
       "net",
+      "net_type",
       "priority",
       "scope",
+      "route_order_rank",
       "preferred_layers",
       "plane_layers",
       "route_class",
@@ -121,6 +123,14 @@ public class RouterIntentSettings implements Serializable, Cloneable {
       "boundary_height_mm");
   private static final Set<String> PRIORITY_VALUES = Set.of("normal", "high", "critical");
   private static final Set<String> SCOPE_VALUES = Set.of("normal", "local", "global");
+  private static final Set<String> NET_TYPE_VALUES = Set.of(
+      "normal",
+      "critical_net",
+      "differential_pair_member",
+      "route_length_match_member",
+      "local_support",
+      "block_port",
+      "source_copper");
   private static final Set<String> RIPUP_PROTECTION_VALUES = Set.of(
       "none",
       "critical",
@@ -212,6 +222,7 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     validateArrayObjectKeys(root, "block_ports", BLOCK_PORT_KEYS);
     validateArrayStringValues(root, "net_intents", "priority", PRIORITY_VALUES);
     validateArrayStringValues(root, "net_intents", "scope", SCOPE_VALUES);
+    validateArrayStringValues(root, "net_intents", "net_type", NET_TYPE_VALUES);
     validateArrayStringValues(root, "net_intents", "ripup_protection", RIPUP_PROTECTION_VALUES);
     validateArrayStringValues(root, "critical_paths", "priority", PRIORITY_VALUES);
     validateArrayStringValues(root, "differential_pairs", "priority", PRIORITY_VALUES);
@@ -305,6 +316,16 @@ public class RouterIntentSettings implements Serializable, Cloneable {
   public int priorityRankForNet(String netName) {
     NetIntent intent = netIntent(netName);
     return intent == null ? 0 : intent.priorityRank();
+  }
+
+  public int routeOrderRankForNet(String netName) {
+    NetIntent intent = netIntent(netName);
+    return intent == null ? 0 : intent.routeOrderRank();
+  }
+
+  public NetType netTypeForNet(String netName) {
+    NetIntent intent = netIntent(netName);
+    return intent == null ? NetType.NORMAL : intent.netType;
   }
 
   public int scopeRankForNet(String netName) {
@@ -637,10 +658,14 @@ public class RouterIntentSettings implements Serializable, Cloneable {
   public static class NetIntent implements Serializable {
     @SerializedName("net")
     public String net;
+    @SerializedName("net_type")
+    public NetType netType;
     @SerializedName("priority")
     public Priority priority;
     @SerializedName("scope")
     public Scope scope;
+    @SerializedName("route_order_rank")
+    public Integer routeOrderRank;
     @SerializedName("preferred_layers")
     public String[] preferredLayers;
     @SerializedName("plane_layers")
@@ -672,6 +697,10 @@ public class RouterIntentSettings implements Serializable, Cloneable {
 
     public int priorityRank() {
       return priority == null ? 0 : priority.rank;
+    }
+
+    public int routeOrderRank() {
+      return routeOrderRank == null ? 0 : routeOrderRank;
     }
 
     public int scopeRank() {
@@ -839,6 +868,23 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     Priority(int rank) {
       this.rank = rank;
     }
+  }
+
+  public enum NetType {
+    @SerializedName("normal")
+    NORMAL,
+    @SerializedName("critical_net")
+    CRITICAL_NET,
+    @SerializedName("differential_pair_member")
+    DIFFERENTIAL_PAIR_MEMBER,
+    @SerializedName("route_length_match_member")
+    ROUTE_LENGTH_MATCH_MEMBER,
+    @SerializedName("local_support")
+    LOCAL_SUPPORT,
+    @SerializedName("block_port")
+    BLOCK_PORT,
+    @SerializedName("source_copper")
+    SOURCE_COPPER
   }
 
   public enum Scope {

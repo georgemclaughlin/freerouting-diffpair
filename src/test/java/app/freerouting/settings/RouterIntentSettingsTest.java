@@ -25,14 +25,16 @@ class RouterIntentSettingsTest {
     RouterIntentSettings intent = RouterIntentSettings.load(writePayload("router-intent.json", validPayload()));
 
     assertEquals("kicad-agent-router-intent", intent.schema);
-    assertEquals(5, intent.schemaVersion);
+    assertEquals(6, intent.schemaVersion);
     assertEquals("esp32_air_quality_node", intent.profile);
     assertEquals(RouterIntentSettings.RouteOrder.PRIORITY_THEN_LOCAL_SCOPE, intent.settings.routeOrder);
     assertEquals(
         RouterIntentSettings.RuntimeRipupProtection.SOURCE_COPPER_AND_CRITICAL,
         intent.settings.ripupProtection);
     assertEquals(RouterIntentSettings.Priority.CRITICAL, intent.netIntents[0].priority);
+    assertEquals(RouterIntentSettings.NetType.CRITICAL_NET, intent.netIntents[0].netType);
     assertEquals(RouterIntentSettings.Scope.GLOBAL, intent.netIntents[0].scope);
+    assertEquals(311, intent.routeOrderRankForNet("3V3"));
     assertEquals(RouterIntentSettings.RipupProtection.CRITICAL, intent.netIntents[0].ripupProtection);
     assertArrayEquals(new String[] { "matched_controls" }, intent.netIntents[0].routeLengthMatchIds);
     assertEquals(RouterIntentSettings.LocalSupportKind.SAME_NET_PAD_TIE, intent.localSupport[0].kind);
@@ -225,7 +227,7 @@ class RouterIntentSettingsTest {
     return """
         {
           "schema": "kicad-agent-router-intent",
-          "schema_version": 5,
+          "schema_version": 6,
           "profile": "esp32_air_quality_node",
           "settings": {
             "deterministic_seed": 123,
@@ -236,8 +238,10 @@ class RouterIntentSettingsTest {
           "net_intents": [
             {
               "net": "3V3",
+              "net_type": "critical_net",
               "priority": "critical",
               "scope": "global",
+              "route_order_rank": 311,
               "preferred_layers": ["F.Cu", "In1.Cu"],
               "plane_layers": [],
               "route_class": "Power",
@@ -255,8 +259,10 @@ class RouterIntentSettingsTest {
             },
             {
               "net": "ESP_BOOT_LOCAL",
+              "net_type": "local_support",
               "priority": "normal",
               "scope": "local",
+              "route_order_rank": 22,
               "preferred_layers": ["F.Cu"],
               "plane_layers": [],
               "route_class": "Control",
