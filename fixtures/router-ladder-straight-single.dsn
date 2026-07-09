@@ -1,0 +1,41 @@
+(pcb router-ladder-straight-single
+  (parser (string_quote "))
+  (resolution um 10)
+  (unit um)
+  (structure
+    (layer F.Cu (type signal) (property (index 0)))
+    (layer B.Cu (type signal) (property (index 1)))
+    (boundary (path pcb 0  0 0  100000 0  100000 -50000  0 -50000  0 0))
+    (via "Via[0-1]_600:300_um")
+    (rule (width 500) (clearance 500) (clearance 100 (type smd_smd)))
+  )
+  (library
+    (padstack Rect[T]Pad_1000x1000_um
+      (shape (rect F.Cu -500 -500 500 500))
+      (shape (rect B.Cu -500 -500 500 500))
+      (attach off)
+    )
+    (padstack "Via[0-1]_600:300_um"
+      (shape (circle F.Cu 600))
+      (shape (circle B.Cu 600))
+      (attach off)
+    )
+    (image Pad_1x1mm
+      (pin Rect[T]Pad_1000x1000_um 1 0 0)
+    )
+  )
+  (placement
+    (component Pad_1x1mm
+      (place P1 10000 -25000 front 0.000000)
+      (place P2 90000 -25000 front 0.000000)
+    )
+  )
+  (network
+    (net NET_A (pins P1-1 P2-1))
+    (class default "" NET_A
+      (rule (width 500) (clearance 500))
+      (circuit (use_via "Via[0-1]_600:300_um") (use_layer F.Cu B.Cu))
+    )
+  )
+  (wiring)
+)
