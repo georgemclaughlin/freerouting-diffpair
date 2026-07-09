@@ -19,6 +19,7 @@ import java.util.LinkedList;
 public class Polyline implements Serializable {
 
   private static final boolean USE_BOUNDING_OCTAGON_FOR_OFFSET_SHAPES = true;
+  private static final double MIN_SPLIT_CORNER_DISTANCE = 1.0;
   /**
    * the array of lines of this Polyline.
    */
@@ -83,6 +84,9 @@ public class Polyline implements Serializable {
    */
   public Polyline(Line[] p_line_arr) {
     Line[] lines = remove_consecutive_parallel_lines(p_line_arr);
+    lines = remove_overlaps(lines);
+    lines = remove_near_duplicate_corners(lines);
+    lines = remove_consecutive_parallel_lines(lines);
     lines = remove_overlaps(lines);
     if (lines.length < 3) {
       arr = new Line[0];
@@ -176,6 +180,35 @@ public class Polyline implements Serializable {
       return p_line_arr;
     }
     // at least 1 line is skipped, adjust the array
+    if (new_length < 3) {
+      return new Line[0];
+    }
+    Line[] result = new Line[new_length];
+    System.arraycopy(tmp_arr, 0, result, 0, new_length);
+    return result;
+  }
+
+  private static Line[] remove_near_duplicate_corners(Line[] p_line_arr) {
+    if (p_line_arr.length < 4) {
+      return p_line_arr;
+    }
+    Line[] tmp_arr = new Line[p_line_arr.length];
+    int new_length = 0;
+    tmp_arr[new_length++] = p_line_arr[0];
+    for (int i = 1; i < p_line_arr.length - 1; i++) {
+      Point prev_corner = p_line_arr[i - 1].intersection(p_line_arr[i]);
+      Point next_corner = p_line_arr[i].intersection(p_line_arr[i + 1]);
+      if (prev_corner != null
+          && next_corner != null
+          && same_corner_for_split(prev_corner, next_corner)) {
+        continue;
+      }
+      tmp_arr[new_length++] = p_line_arr[i];
+    }
+    tmp_arr[new_length++] = p_line_arr[p_line_arr.length - 1];
+    if (new_length == p_line_arr.length) {
+      return p_line_arr;
+    }
     if (new_length < 3) {
       return new Line[0];
     }
@@ -858,14 +891,18 @@ public class Polyline implements Serializable {
         sb.toString(),
         "Polyline split p_line_no=" + p_line_no,
         new Point[] { this.first_corner(), new_end_corner, this.last_corner() });
-    if (p_line_no == 1 && new_end_corner.equals(this.first_corner())
-        || p_line_no >= arr.length - 2 && new_end_corner.equals(this.last_corner())) {
+    if (p_line_no == 1 && same_corner_for_split(new_end_corner, this.first_corner())
+        || p_line_no >= arr.length - 2 && same_corner_for_split(new_end_corner, this.last_corner())) {
       // No split, if p_end_line does not intersect, but touches
       // only this Polyline at an end point.
       return null;
     }
+    if (near_but_not_equal_corner_for_split(new_end_corner, this.corner(p_line_no - 1))
+        || near_but_not_equal_corner_for_split(new_end_corner, this.corner(p_line_no))) {
+      return null;
+    }
     Line[] first_piece;
-    if (this.corner(p_line_no - 1).equals(new_end_corner)) {
+    if (same_corner_for_split(this.corner(p_line_no - 1), new_end_corner)) {
       // skip line segment of length 0 at the end of the first piece
       first_piece = new Line[p_line_no + 1];
       System.arraycopy(arr, 0, first_piece, 0, first_piece.length);
@@ -876,7 +913,7 @@ public class Polyline implements Serializable {
       first_piece[p_line_no + 1] = p_end_line;
     }
     Line[] second_piece;
-    if (this.corner(p_line_no).equals(new_end_corner)) {
+    if (same_corner_for_split(this.corner(p_line_no), new_end_corner)) {
       // skip line segment of length 0 at the beginning of the second piece
       second_piece = new Line[arr.length - p_line_no];
       System.arraycopy(this.arr, p_line_no, second_piece, 0, second_piece.length);
@@ -893,6 +930,17 @@ public class Polyline implements Serializable {
       return null;
     }
     return result;
+  }
+
+  private static boolean same_corner_for_split(Point p_first, Point p_second) {
+    if (p_first.equals(p_second)) {
+      return true;
+    }
+    return p_first.to_float().distance(p_second.to_float()) < MIN_SPLIT_CORNER_DISTANCE;
+  }
+
+  private static boolean near_but_not_equal_corner_for_split(Point p_first, Point p_second) {
+    return !p_first.equals(p_second) && same_corner_for_split(p_first, p_second);
   }
 
   /**

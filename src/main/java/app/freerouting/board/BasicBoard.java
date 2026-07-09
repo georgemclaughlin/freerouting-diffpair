@@ -834,6 +834,9 @@ public class BasicBoard implements Serializable {
     boolean something_changed = true;
     Item curr_item;
     int iterationCount = 0;
+    String lastChange = "none";
+    Set<String> seenGeometryStates = new HashSet<>();
+    seenGeometryStates.add(normalizeTraceGeometryFingerprint(p_net_no));
     while (something_changed) {
       if (++iterationCount > MAX_NORMALIZE_ITERATIONS) {
         // Safety valve: after this many passes the outer loop has not converged.
@@ -846,7 +849,7 @@ public class BasicBoard implements Serializable {
         FRLogger.warn("BasicBoard.normalize_traces: reached " + MAX_NORMALIZE_ITERATIONS
             + " iterations for net '" + netName + "' — stopping to prevent hang."
             + " The board geometry for this net may be oscillating (split/combine cycle);"
-            + " traces are kept as-is. " + normalizeTraceDiagnostics(p_net_no));
+            + " traces are kept as-is. last_change=" + lastChange + ". " + normalizeTraceDiagnostics(p_net_no));
         break;
       }
       something_changed = false;
@@ -863,13 +866,27 @@ public class BasicBoard implements Serializable {
         }
         if (curr_item.contains_net(p_net_no) && curr_item instanceof PolylineTrace curr_trace
             && curr_item.is_on_the_board()) {
+          String traceBeforeNormalize = traceSummary(curr_trace);
           if (curr_trace.normalize(null)) {
             something_changed = true;
             result = true;
+            lastChange = "normalize " + traceBeforeNormalize;
           } else if (!curr_trace.is_user_fixed() && this.remove_if_cycle(curr_trace)) {
             something_changed = true;
             result = true;
+            lastChange = "remove_if_cycle " + traceBeforeNormalize;
           }
+        }
+      }
+      if (something_changed) {
+        String currentGeometryState = normalizeTraceGeometryFingerprint(p_net_no);
+        if (!seenGeometryStates.add(currentGeometryState)) {
+          String netName = (rules != null && rules.nets != null && rules.nets.get(p_net_no) != null)
+              ? rules.nets.get(p_net_no).name : String.valueOf(p_net_no);
+          FRLogger.debug("BasicBoard.normalize_traces: repeated geometry state for net '" + netName
+              + "' after " + iterationCount + " iterations — stopping normalization cycle."
+              + " last_change=" + lastChange + ". " + normalizeTraceDiagnostics(p_net_no));
+          break;
         }
       }
     }
@@ -902,19 +919,7 @@ public class BasicBoard implements Serializable {
           if (!sample.isEmpty()) {
             sample.append("; ");
           }
-          sample.append('#')
-              .append(trace.get_id_no())
-              .append("@")
-              .append(layerName(trace.get_layer()))
-              .append("[corners=")
-              .append(trace.corner_count())
-              .append(",fixed=")
-              .append(trace.get_fixed_state())
-              .append(",from=")
-              .append(pointSummary(trace.first_corner()))
-              .append(",to=")
-              .append(pointSummary(trace.last_corner()))
-              .append(']');
+          sample.append(traceSummary(trace));
         }
       }
     }
@@ -924,6 +929,33 @@ public class BasicBoard implements Serializable {
         + ", total_length=" + FRLogger.defaultFloatFormat.format(totalLength)
         + ", layers=" + layerCountSummary(layerCounts)
         + ", sample=" + (sample.isEmpty() ? "[]" : sample);
+  }
+
+  private String normalizeTraceGeometryFingerprint(int p_net_no) {
+    SortedSet<String> traces = new TreeSet<>();
+    Iterator<UndoableObjects.UndoableObjectNode> it = item_list.start_read_object();
+    for (;;) {
+      UndoableObjects.Storable currObject = item_list.read_object(it);
+      if (currObject == null) {
+        break;
+      }
+      if (currObject instanceof PolylineTrace trace
+          && trace.contains_net(p_net_no)
+          && trace.is_on_the_board()) {
+        traces.add(traceGeometryFingerprint(trace));
+      }
+    }
+    return String.join("|", traces);
+  }
+
+  private String traceGeometryFingerprint(PolylineTrace p_trace) {
+    return layerName(p_trace.get_layer())
+        + ";w="
+        + p_trace.get_half_width()
+        + ";fixed="
+        + p_trace.get_fixed_state()
+        + ";"
+        + cornerSummary(p_trace);
   }
 
   private String layerCountSummary(Map<Integer, Integer> p_layer_counts) {
@@ -952,6 +984,24 @@ public class BasicBoard implements Serializable {
         : Integer.toString(p_layer);
   }
 
+  private String traceSummary(PolylineTrace p_trace) {
+    return "#"
+        + p_trace.get_id_no()
+        + "@"
+        + layerName(p_trace.get_layer())
+        + "[corners="
+        + p_trace.corner_count()
+        + ",fixed="
+        + p_trace.get_fixed_state()
+        + ",from="
+        + pointSummary(p_trace.first_corner())
+        + ",to="
+        + pointSummary(p_trace.last_corner())
+        + ",corners="
+        + cornerSummary(p_trace)
+        + "]";
+  }
+
   private String pointSummary(Point p_point) {
     if (p_point == null) {
       return "null";
@@ -962,6 +1012,19 @@ public class BasicBoard implements Serializable {
         + ","
         + FRLogger.defaultFloatFormat.format(approx.y)
         + ")";
+  }
+
+  private String cornerSummary(PolylineTrace p_trace) {
+    StringBuilder result = new StringBuilder("[");
+    int cornerCount = p_trace.corner_count();
+    for (int i = 0; i < cornerCount; i++) {
+      if (i > 0) {
+        result.append("->");
+      }
+      result.append(pointSummary(p_trace.polyline().corner(i)));
+    }
+    result.append(']');
+    return result.toString();
   }
 
   /**

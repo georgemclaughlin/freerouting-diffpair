@@ -3,6 +3,7 @@ package app.freerouting.board;
 import app.freerouting.geometry.planar.IntBox;
 import app.freerouting.geometry.planar.IntOctagon;
 import app.freerouting.geometry.planar.IntPoint;
+import app.freerouting.geometry.planar.Line;
 import app.freerouting.geometry.planar.Point;
 import app.freerouting.geometry.planar.Polyline;
 import app.freerouting.geometry.planar.PolylineShape;
@@ -271,5 +272,73 @@ public class PolylineTraceSplitTest {
 
         Assertions.assertFalse(isCycle,
                 "Trace should not be detected as a cycle just because an overlapping trace exists");
+    }
+
+    @Test
+    void polylineSplitIgnoresSubUnitCornerSliver() {
+        Polyline polyline = new Polyline(new Point[] {
+                new IntPoint(0, 0),
+                new IntPoint(1000, 0),
+                new IntPoint(1000, 1000)
+        });
+
+        Line subUnitSplitLine = new Line(new IntPoint(999, -100), new IntPoint(1000, 100));
+
+        Assertions.assertNull(polyline.split(1, subUnitSplitLine),
+                "A split less than one coordinate unit from the adjacent corner creates a meaningless sliver");
+
+        Point oneUnitFromCorner = new IntPoint(999, 0);
+        Line oneUnitSplitLine = new Line(oneUnitFromCorner, new IntPoint(999, 100));
+
+        Assertions.assertNotNull(polyline.split(1, oneUnitSplitLine),
+                "A split exactly one coordinate unit from the adjacent corner is still a real split");
+    }
+
+    @Test
+    void polylineConstructionRemovesSubUnitAdjacentCorner() {
+        Polyline polyline = new Polyline(new Line[] {
+                new Line(new IntPoint(0, -100), new IntPoint(0, 100)),
+                new Line(new IntPoint(0, 0), new IntPoint(1000, 0)),
+                new Line(new IntPoint(1000, 0), new IntPoint(1001, 1)),
+                new Line(new IntPoint(1001, 0), new IntPoint(1000, 1)),
+                new Line(new IntPoint(1500, -1000), new IntPoint(1500, 1000))
+        });
+
+        Assertions.assertEquals(3, polyline.corner_count(),
+                "Constructor should collapse a sub-unit segment between adjacent corners");
+        for (int i = 1; i < polyline.corner_count(); i++) {
+            double distance = polyline.corner(i - 1).to_float().distance(polyline.corner(i).to_float());
+            Assertions.assertTrue(distance >= 1.0,
+                    "Adjacent polyline corners should not be separated by a sub-unit segment");
+        }
+    }
+
+    @Test
+    void normalizeTracesConvergesWithDuplicateTrace() {
+        BasicBoard board = createTestBoard();
+        int layerIndex = 0;
+        int netNo = 1;
+        int clearanceClass = 1;
+        int halfWidth = 1000;
+        Point start = new IntPoint(10000, 10000);
+        Point end = new IntPoint(20000, 10000);
+
+        board.insert_item(new PolylineTrace(
+                new Polyline(start, end), layerIndex, halfWidth, new int[] { netNo },
+                clearanceClass, 1, 0, FixedState.UNFIXED, board));
+        board.insert_item(new PolylineTrace(
+                new Polyline(start, end), layerIndex, halfWidth, new int[] { netNo },
+                clearanceClass, 2, 0, FixedState.UNFIXED, board));
+
+        Assertions.assertTrue(board.normalize_traces(netNo));
+
+        int onBoardTraceCount = 0;
+        for (Item item : board.get_items()) {
+            if (item instanceof PolylineTrace trace && trace.contains_net(netNo) && trace.is_on_the_board()) {
+                onBoardTraceCount++;
+            }
+        }
+        Assertions.assertTrue(onBoardTraceCount <= 1,
+                "Duplicate identical traces should not remain duplicated after normalization");
     }
 }
