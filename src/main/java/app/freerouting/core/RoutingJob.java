@@ -70,6 +70,9 @@ public class RoutingJob implements Serializable, Comparable<RoutingJob> {
   @SerializedName("stage")
   @Schema(description = "The current stage of the job")
   public RoutingStage stage = RoutingStage.IDLE;
+  @SerializedName("incomplete_connection_count")
+  @Schema(name = "incomplete_connection_count", description = "Number of unrouted connections when the job finished")
+  public Integer incompleteConnectionCount;
   @SerializedName("priority")
   @Schema(description = "The priority of the job")
   public RoutingJobPriority priority = RoutingJobPriority.NORMAL;
@@ -268,6 +271,26 @@ public class RoutingJob implements Serializable, Comparable<RoutingJob> {
       return Duration.between(startedAt, finishedAt);
     }
     return Duration.between(startedAt, Instant.now());
+  }
+
+  /**
+   * Records the final ratsnest count and returns the corresponding terminal state.
+   * A routing process ending is only successful when the board has no unrouted
+   * connections.
+   */
+  public RoutingJobState calculateCompletionState() {
+    if (board == null) {
+      incompleteConnectionCount = null;
+      return RoutingJobState.TERMINATED;
+    }
+
+    var completionSnapshot = board.deepCopy();
+    if (completionSnapshot == null) {
+      incompleteConnectionCount = null;
+      return RoutingJobState.TERMINATED;
+    }
+    incompleteConnectionCount = completionSnapshot.get_statistics().connections.incompleteCount;
+    return incompleteConnectionCount == 0 ? RoutingJobState.COMPLETED : RoutingJobState.INCOMPLETE;
   }
 
   public boolean setInput(byte[] inputFileContent) {

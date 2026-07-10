@@ -69,19 +69,12 @@ public class UnconnectedItemsReproductionTest extends RoutingFixtureTest {
         assertEquals(trace1.get_net_no(0), trace2.get_net_no(0),
             "Traces 2402 and 2411 must belong to the same net");
 
-        // Trace 2402 is genuinely dangling: the board-model connectivity check
-        // confirms neither endpoint has a contact. The DRC must report this.
-        assertTrue(trace1.is_tail(),
-            "Trace 2402 (GND) is expected to be a dangling trace (is_tail == true). "
-            + "It has no connected endpoints in this partially-routed board.");
-
-        // Confirm that pin 321 is indeed NOT in the normal contacts of trace 2402.
-        // (This is the correct board state — not a false negative from the DRC.)
-        if (item321 != null) {
-            Collection<Item> contacts1 = item1.get_normal_contacts();
-            assertFalse(contacts1.contains(item321),
-                "Trace 2402 correctly has NO connection to pin 321 in this board state.");
-        }
+        assertNotNull(item321, "GND pin 321 should be present");
+        Collection<Item> contacts1 = item1.get_normal_contacts();
+        assertTrue(contacts1.contains(item321),
+            "Trace 2402 ends inside the through-hole copper for pin 321 and must register a contact.");
+        assertFalse(trace1.is_tail(),
+            "Trace 2402 has a trace contact at one end and a through-hole pin contact at the other.");
 
         Item via2522item = board.get_items().stream()
             .filter(item -> item.get_id_no() == 2522)
@@ -161,13 +154,20 @@ public class UnconnectedItemsReproductionTest extends RoutingFixtureTest {
                 + "a false positive in the DRC.");
         }
 
-        // Sample from reference JSON: GND/Top(2340), +5V/Top(1869), GND/Bottom(2372), +5V/Bottom(1802)
+        // Reference samples that remain genuinely dangling after through-hole
+        // pad-interior contacts are recognized symmetrically.
         Set<Integer> danglingTrackIds = allIssues.stream()
             .filter(ui -> "track_dangling".equals(ui.type))
             .map(ui -> ui.first_item.get_id_no())
             .collect(Collectors.toSet());
 
-        int[] spotCheckIds = {2340, 1869, 2372, 1802};
+        Trace connectedTrack = assertInstanceOf(Trace.class, board.get_item(2340));
+        assertFalse(connectedTrack.is_tail(),
+            "Track 2340 ends inside pin 338 and is not dangling.");
+        assertFalse(danglingTrackIds.contains(2340),
+            "DRC must not report track 2340 as dangling after PTH contact resolution.");
+
+        int[] spotCheckIds = {1869, 2372, 1802};
         for (int trackId : spotCheckIds) {
             Item trackItem = board.get_item(trackId);
             assertNotNull(trackItem, "Track with ID " + trackId + " should exist in the board");
@@ -175,7 +175,6 @@ public class UnconnectedItemsReproductionTest extends RoutingFixtureTest {
                 "Item " + trackId + " should be a Trace");
             assertTrue(track.is_tail(),
                 "Track " + trackId + " should be dangling (is_tail == true)");
-
             assertTrue(danglingTrackIds.contains(trackId),
                 "DRC should detect track " + trackId + " as a dangling track");
         }

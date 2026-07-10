@@ -1,6 +1,7 @@
 package app.freerouting.fixtures;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import app.freerouting.board.Item;
@@ -8,10 +9,13 @@ import app.freerouting.board.Trace;
 import app.freerouting.board.Unit;
 import app.freerouting.board.Via;
 import app.freerouting.core.RoutingJob;
+import app.freerouting.core.RoutingJobState;
 import app.freerouting.logger.FRLogger;
 import app.freerouting.rules.Net;
 import app.freerouting.settings.RouterIntentSettings;
 import app.freerouting.settings.sources.TestingSettings;
+import app.freerouting.util.gson.GsonProvider;
+import com.google.gson.JsonParser;
 import java.time.Duration;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
@@ -22,6 +26,8 @@ class RouterLadderRoutingTest extends RoutingFixtureTest {
   void straightTwoPinNetRoutesWithoutViasOrDetour() {
     RoutingJob job = routeFixture("router-ladder-straight-single.dsn");
 
+    assertEquals(RoutingJobState.COMPLETED, job.state);
+    assertEquals(0, job.incompleteConnectionCount);
     assertRoutingResult(job, "router-ladder-straight-single.dsn")
         .maxDuration(Duration.ofSeconds(10))
         .exactIncompleteConnections(0)
@@ -59,6 +65,13 @@ class RouterLadderRoutingTest extends RoutingFixtureTest {
   void hardBlockedTwoPinNetRemainsUnroutedWithoutViolations() {
     RoutingJob job = routeFixture("router-ladder-hard-blocked-single.dsn");
 
+    assertEquals(RoutingJobState.INCOMPLETE, job.state);
+    assertEquals(1, job.incompleteConnectionCount);
+    assertNotNull(job.output);
+    assertNotNull(job.output.getData());
+    var jobReport = JsonParser.parseString(GsonProvider.GSON.toJson(job)).getAsJsonObject();
+    assertEquals("INCOMPLETE", jobReport.get("state").getAsString());
+    assertEquals(1, jobReport.get("incomplete_connection_count").getAsInt());
     assertRoutingResult(job, "router-ladder-hard-blocked-single.dsn")
         .maxDuration(Duration.ofSeconds(10))
         .exactIncompleteConnections(1)

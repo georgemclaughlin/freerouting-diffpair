@@ -164,7 +164,7 @@ PUT https://api.freerouting.app/v1/jobs/<jobId>/start
 GET https://api.freerouting.app/v1/jobs/<jobId>
 ```
 
-The `state` field will transition through: `QUEUED` -> `READY_TO_START` -> `RUNNING` -> `COMPLETED`.
+The `state` field will transition through `QUEUED` -> `READY_TO_START` -> `RUNNING`, then finish as `COMPLETED` when every connection is routed or `INCOMPLETE` when residual connections remain.
 
 For real-time log streaming, open the SSE endpoint in a compatible client:
 
@@ -174,7 +174,7 @@ GET https://api.freerouting.app/v1/jobs/<jobId>/logs/stream
 
 #### Step 7 — Download the result
 
-Once `state` is `COMPLETED`, fetch the Specctra SES output:
+Once `state` is `COMPLETED` or `INCOMPLETE`, fetch the Specctra SES output. Treat `INCOMPLETE` output as a diagnostic artifact rather than an accepted route:
 
 ```http
 GET https://api.freerouting.app/v1/jobs/<jobId>/output

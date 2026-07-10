@@ -118,8 +118,7 @@ public class RoutingFixtureTest {
     long startTime = System.currentTimeMillis();
     long timeoutInMillis = TextManager.parseTimespanString(job.routerSettings.jobTimeoutString) * 1000;
 
-    while ((job.state != RoutingJobState.COMPLETED) && (job.state != RoutingJobState.CANCELLED)
-        && (job.state != RoutingJobState.TERMINATED) && (job.state != RoutingJobState.TIMED_OUT)) {
+    while (!job.state.isTerminal()) {
       try {
         Thread.sleep(100);
       } catch (InterruptedException e) {

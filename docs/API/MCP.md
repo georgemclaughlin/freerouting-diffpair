@@ -109,9 +109,10 @@ graph TD
     E -->|Step 3 (Optional)| G
     F -->|Step 4| G
     G -->|Step 4| H[get_job_details]
-    H -->|Poll: State != COMPLETED| H
+    H -->|Poll: State is nonterminal| H
     H -->|State == COMPLETED (Recommended)| I[download_job_output_to_local_file]
     H -->|State == COMPLETED (Alternative)| J[download_job_output_file]
+    H -->|State == INCOMPLETE| J
     J -->|Step 5| K[decode_base64]
 ```
 
@@ -141,7 +142,7 @@ graph TD
 - **Poll**: Repeatedly call `get_job_details` to monitor the routing progress.
   - **Important Polling Guideline**: Call `get_job_details` with a **polling interval of 2 to 5 seconds** (e.g., sleep 3 seconds between calls). This prevents overloading the local or public server endpoints while maintaining responsive feedback.
   - **Real-Time Logs**: Alternatively, for instant, granular routing feedback, you can stream routing log events via the `stream_job_logs` endpoint.
-  - Continue polling until the job state transitions to `COMPLETED` (or `FAILED`/`CANCELLED`).
+  - Continue polling until the job reaches a terminal state. `COMPLETED` means every connection was routed; `INCOMPLETE` reports a finished run with residual connections and retains diagnostic output.
 
 #### Step 5: Retrieve Output
 
@@ -150,7 +151,7 @@ graph TD
 - **Benefit**: The MCP server downloads the Base64 result, decodes it in-memory, and writes it directly to disk. Large layout content never enters the LLM's context window.
 
 ##### Option B: Manual Base64 Download (Alternative)
-- **Download**: Once status is `COMPLETED`, call `download_job_output_file` to retrieve the routed Specctra SES layout. It is returned as a Base64-encoded string.
+- **Download**: Once status is `COMPLETED` or `INCOMPLETE`, call `download_job_output_file` to retrieve the final Specctra SES layout. An `INCOMPLETE` result is diagnostic and must not be treated as an accepted route.
 - **Decode**: It is recommended to use the local `decode_base64` tool to convert the Base64 string back into a plain-text Specctra SES format to write to disk, rather than running external shell commands.
 
 ---
@@ -243,4 +244,3 @@ Below are several example prompts you can use to instruct an LLM connected via t
 >    ```
 > 4. Start and poll the job.
 > 5. Download output via `download_job_output_to_local_file` to `C:/Work/my_board.ses`.
-

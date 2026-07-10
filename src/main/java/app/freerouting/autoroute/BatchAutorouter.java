@@ -1143,7 +1143,7 @@ public class BatchAutorouter extends NamedAlgorithm {
           }
 
           if (consecutiveNoImprovementPasses >= STAGNATION_PASS_LIMIT) {
-            String report = buildUnroutedConnectionsReport();
+            String report = buildUnroutedConnectionsReport(this.board);
             job.logInfo("The router's score (" + FRLogger.defaultFloatFormat.format(boardScoreAfter)
                 + ") has not improved by more than " + STAGNATION_SCORE_THRESHOLD
                 + " points in the last " + STAGNATION_PASS_LIMIT + " passes ("
@@ -1166,7 +1166,7 @@ public class BatchAutorouter extends NamedAlgorithm {
           passOfBestScore = currentPass;
           incompleteCountAtBestScore = boardStatisticsAfter.connections.incompleteCount;
         } else if ((currentPass - passOfBestScore) >= STAGNATION_PASS_LIMIT) {
-          String report = buildUnroutedConnectionsReport();
+          String report = buildUnroutedConnectionsReport(this.board);
           job.logInfo("The router's best score (" + FRLogger.defaultFloatFormat.format(globalBestScore)
               + ") has not improved by more than " + STAGNATION_SCORE_THRESHOLD
               + " points since pass #" + passOfBestScore
@@ -1248,8 +1248,8 @@ public class BatchAutorouter extends NamedAlgorithm {
     return !this.thread.is_stop_auto_router_requested();
   }
 
-  private String buildUnroutedConnectionsReport() {
-    DesignRulesChecker tempDrc = new DesignRulesChecker(this.board, null);
+  public static String buildUnroutedConnectionsReport(RoutingBoard board) {
+    DesignRulesChecker tempDrc = new DesignRulesChecker(board, null);
     tempDrc.calculateAllIncompletes();
     AirLine[] airlines = tempDrc.getAllAirlines();
 
@@ -1261,8 +1261,8 @@ public class BatchAutorouter extends NamedAlgorithm {
     Map<String, List<String>> byNet = new LinkedHashMap<>();
     for (AirLine al : airlines) {
       String netName = al.net != null ? al.net.name : "(unknown net)";
-      String fromDesc = describeItem(al.from_item);
-      String toDesc   = describeItem(al.to_item);
+      String fromDesc = describeItem(board, al.from_item);
+      String toDesc   = describeItem(board, al.to_item);
       byNet.computeIfAbsent(netName, k -> new ArrayList<>())
            .add("    - " + fromDesc + "  ->  " + toDesc);
     }
@@ -1284,7 +1284,7 @@ public class BatchAutorouter extends NamedAlgorithm {
    * stagnation report.  For pins the format is {@code ComponentName-PinName}
    * (e.g. {@code J2-A3}); for all other item types a generic fallback is used.
    */
-  private String describeItem(Item item) {
+  private static String describeItem(RoutingBoard board, Item item) {
     if (item instanceof Pin pin) {
       try {
         app.freerouting.board.Component comp = board.components.get(pin.get_component_no());

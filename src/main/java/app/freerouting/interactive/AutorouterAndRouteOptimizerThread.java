@@ -680,8 +680,10 @@ public class AutorouterAndRouteOptimizerThread extends InteractiveActionThread {
       routingJob.state = RoutingJobState.CANCELLED;
     } else {
       routingJob.finishedAt = Instant.now();
-      routingJob.state = RoutingJobState.COMPLETED;
-      globalSettings.statistics.incrementJobsCompleted();
+      routingJob.state = routingJob.calculateCompletionState();
+      if (routingJob.state == RoutingJobState.COMPLETED) {
+        globalSettings.statistics.incrementJobsCompleted();
+      }
     }
 
     for (ThreadActionListener hl : this.listeners) {

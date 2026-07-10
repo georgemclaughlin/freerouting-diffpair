@@ -12,8 +12,7 @@ import java.util.Random;
  */
 public class PolygonShape extends PolylineShape {
 
-  private static final int seed = 99;
-  private static final Random random_generator = new Random(seed);
+  private static final int SEED = 99;
   public final Point[] corners;
   /**
    * the following fields are for storing precalculated data
@@ -513,9 +512,7 @@ public class PolygonShape extends PolylineShape {
     if (this.precalculated_convex_pieces == null)
     // not yet precalculated
     {
-      // use a fixed seed to get reproducible result
-      random_generator.setSeed(seed);
-      Collection<PolygonShape> convex_pieces = split_to_convex_recu();
+      Collection<PolygonShape> convex_pieces = split_to_convex_recu(new Random(SEED));
       if (convex_pieces == null) {
         // split failed, maybe the polygon has selfontersections
         return null;
@@ -533,9 +530,9 @@ public class PolygonShape extends PolylineShape {
   /**
    * Private recursive part of split_to_convex. Returns a collection of polygon shape pieces.
    */
-  private Collection<PolygonShape> split_to_convex_recu() {
+  private Collection<PolygonShape> split_to_convex_recu(Random randomGenerator) {
     // start with a hashed corner and search the first concave corner
-    int start_corner_no = random_generator.nextInt(corners.length);
+    int start_corner_no = randomGenerator.nextInt(corners.length);
     Point curr_corner = corners[start_corner_no];
     Point prev_corner;
     if (start_corner_no != 0) {
@@ -605,11 +602,11 @@ public class PolygonShape extends PolylineShape {
       corner_ind = (corner_ind + 1) % corners.length;
     }
     PolygonShape last_piece = new PolygonShape(last_arr);
-    Collection<PolygonShape> c1 = first_piece.split_to_convex_recu();
+    Collection<PolygonShape> c1 = first_piece.split_to_convex_recu(randomGenerator);
     if (c1 == null) {
       return null;
     }
-    Collection<PolygonShape> c2 = last_piece.split_to_convex_recu();
+    Collection<PolygonShape> c2 = last_piece.split_to_convex_recu(randomGenerator);
     if (c2 == null) {
       return null;
     }

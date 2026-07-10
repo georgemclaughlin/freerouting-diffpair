@@ -11,5 +11,14 @@ public enum RoutingJobState {
   TIMED_OUT, // The job has been timed out
   STOPPING, // The job is in the process of being stopped
   CANCELLED, // The job has been cancelled by the user
-  TERMINATED // The job has been terminated due to an error
+  TERMINATED, // The job has been terminated due to an error
+  INCOMPLETE; // Routing finished, but one or more connections remain unrouted
+
+  /** Returns true when no further processing will change this job's state. */
+  public boolean isTerminal() {
+    return switch (this) {
+      case INVALID, COMPLETED, TIMED_OUT, CANCELLED, TERMINATED, INCOMPLETE -> true;
+      default -> false;
+    };
+  }
 }

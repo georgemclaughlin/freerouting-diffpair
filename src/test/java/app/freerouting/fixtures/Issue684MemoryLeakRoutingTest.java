@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import app.freerouting.autoroute.BoardHistory;
 import app.freerouting.core.RoutingJob;
-import app.freerouting.core.RoutingJobState;
 import app.freerouting.logger.FRLogger;
 import app.freerouting.settings.sources.TestingSettings;
 import java.time.Duration;
@@ -78,9 +77,7 @@ public class Issue684MemoryLeakRoutingTest extends RoutingFixtureTest {
     RoutingJob completed = RunRoutingJob(job);
 
     assertTrue(
-        completed.state == RoutingJobState.COMPLETED
-            || completed.state == RoutingJobState.CANCELLED
-            || completed.state == RoutingJobState.TERMINATED,
+        completed.state.isTerminal(),
         "Routing job must reach a terminal state; actual state: " + completed.state);
 
     assertNotNull(completed.board,

@@ -3,7 +3,6 @@ package app.freerouting.management;
 import app.freerouting.Freerouting;
 import app.freerouting.autoroute.BatchAutorouter;
 import app.freerouting.autoroute.BatchOptimizer;
-import app.freerouting.autoroute.DifferentialPairAutorouter;
 import app.freerouting.autoroute.NamedAlgorithm;
 import app.freerouting.autoroute.events.BoardUpdatedEvent;
 import app.freerouting.autoroute.events.BoardUpdatedEventListener;
@@ -116,17 +115,6 @@ public class RoutingJobSchedulerActionThread extends StoppableThread {
         }
       });
 
-      if (job.board != null
-          && job.board.rules != null
-          && job.board.rules.differential_pairs != null
-          && job.board.rules.differential_pairs.count() > 0
-          && !job.thread.isStopRequested()) {
-        int reservedPairs = new DifferentialPairAutorouter(job).preRouteCoupledPairs();
-        if (reservedPairs > 0) {
-          setJobOutput(job);
-        }
-      }
-
       // Call runBatchLoop
       batchRouter.runBatchLoop();
 
@@ -140,7 +128,8 @@ public class RoutingJobSchedulerActionThread extends StoppableThread {
         double totalTime = totalSeconds
             + (java.time.Duration.between(sessionStartTime, sessionEndTime).getNano() / 1000000000.0);
 
-        var finalStats = job.board.get_statistics();
+        var summarySnapshot = job.board.deepCopy();
+        var finalStats = summarySnapshot != null ? summarySnapshot.get_statistics() : job.board.get_statistics();
 
         String completionStatus = "completed:";
         // Check for timeout explicitly because job.state might not be updated to
@@ -201,27 +190,29 @@ public class RoutingJobSchedulerActionThread extends StoppableThread {
       job.stage = RoutingStage.IDLE;
     }
 
-    if (job.board != null
-        && job.board.rules != null
-        && job.board.rules.differential_pairs.count() > 0
-        && !job.thread.isStopRequested()) {
-      job.stage = RoutingStage.OPTIMIZATION;
-      int adjustedPairs = new DifferentialPairAutorouter(job).run();
-      if (adjustedPairs > 0) {
-        setJobOutput(job);
-      }
-      job.stage = RoutingStage.IDLE;
+    if (job.board != null) {
+      setJobOutput(job);
     }
 
     job.finishedAt = Instant.now();
     if (job.state == RoutingJobState.RUNNING) {
-      job.state = RoutingJobState.COMPLETED;
-      Freerouting.globalSettings.statistics.incrementJobsCompleted();
+      job.state = job.calculateCompletionState();
+      if (job.state == RoutingJobState.COMPLETED) {
+        Freerouting.globalSettings.statistics.incrementJobsCompleted();
+      }
     } else if (job.state == RoutingJobState.STOPPING) {
       if (job.isCancelledByUser()) {
         job.state = RoutingJobState.CANCELLED;
       } else {
-        job.state = RoutingJobState.COMPLETED;
+        job.state = job.calculateCompletionState();
+      }
+    }
+
+    if (job.incompleteConnectionCount != null && job.incompleteConnectionCount > 0) {
+      var reportSnapshot = job.board.deepCopy();
+      if (reportSnapshot != null) {
+        job.logInfo("The following connections could not be routed -- please review your design:\n"
+            + BatchAutorouter.buildUnroutedConnectionsReport(reportSnapshot));
       }
     }
 

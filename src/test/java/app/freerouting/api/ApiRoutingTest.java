@@ -209,10 +209,7 @@ class ApiRoutingTest {
         JsonObject polledJob = JsonParser.parseString(pollResp.body()).getAsJsonObject();
         String state = polledJob.has("state") ? polledJob.get("state").getAsString() : null;
 
-        if (RoutingJobState.COMPLETED.name().equals(state)
-            || RoutingJobState.CANCELLED.name().equals(state)
-            || RoutingJobState.TERMINATED.name().equals(state)
-            || RoutingJobState.TIMED_OUT.name().equals(state)) {
+        if (state != null && RoutingJobState.valueOf(state).isTerminal()) {
           terminalState = state;
           break;
         }
@@ -254,4 +251,3 @@ class ApiRoutingTest {
     throw new IOException("Test file not found: " + filename);
   }
 }
-

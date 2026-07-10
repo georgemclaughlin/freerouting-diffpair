@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import app.freerouting.Freerouting;
 import app.freerouting.core.RoutingJob;
-import app.freerouting.core.RoutingJobState;
 import app.freerouting.management.HeadlessBoardManager;
 import app.freerouting.settings.GlobalSettings;
 import app.freerouting.settings.sources.TestingSettings;
@@ -60,9 +59,7 @@ class HeadlessCompleteRoutingTest extends RoutingFixtureTest {
     RoutingJob completed = RunRoutingJob(job);
 
     assertTrue(
-        completed.state == RoutingJobState.COMPLETED
-            || completed.state == RoutingJobState.CANCELLED
-            || completed.state == RoutingJobState.TERMINATED,
+        completed.state.isTerminal(),
         "Routing job must reach a terminal state; actual state: " + completed.state);
   }
 
@@ -104,12 +101,8 @@ class HeadlessCompleteRoutingTest extends RoutingFixtureTest {
     RoutingJob completed = RunRoutingJob(job);
 
     assertTrue(
-        completed.state == RoutingJobState.COMPLETED
-            || completed.state == RoutingJobState.CANCELLED
-            || completed.state == RoutingJobState.TERMINATED,
+        completed.state.isTerminal(),
         "Empty-board routing job must reach a terminal state; actual: " + completed.state);
   }
 }
-
-
 

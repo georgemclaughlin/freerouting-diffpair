@@ -267,11 +267,11 @@ public abstract class DrillItem extends Item implements Connectable, Serializabl
     Point drill_center = this.get_center();
     int search_layer = -1;
     TileShape search_shape = TileShape.get_instance(drill_center);
-    if (this instanceof Pin && this.first_layer() == this.last_layer()) {
+    if (this instanceof Pin) {
       Shape pin_shape = get_shape_on_layer(this.first_layer());
-      if (pin_shape instanceof TileShape tile_shape) {
-        search_shape = tile_shape;
-        search_layer = this.first_layer();
+      if (pin_shape != null) {
+        search_shape = pin_shape.bounding_tile();
+        search_layer = this.first_layer() == this.last_layer() ? this.first_layer() : -1;
       }
     }
     Set<SearchTreeObject> overlaps = board.overlapping_objects(search_shape, search_layer);

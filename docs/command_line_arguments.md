@@ -274,6 +274,8 @@ java -jar freerouting-2.2.2.jar -de MyBoard.dsn -do MyBoard.ses
 - Loads `MyBoard.dsn`.
 - Performs autorouting.
 - Saves the routed design to `MyBoard.ses`.
+- Exits successfully only when all connections are routed. If connections remain, Freerouting still saves the diagnostic session and exits nonzero.
+- Emits a final `FREEROUTING_RESULT` JSON record containing `state` and `incomplete_connection_count` for automation.
 
 ### Example 2: Ignoring Specific Net Classes
 

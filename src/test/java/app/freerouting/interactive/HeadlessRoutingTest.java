@@ -99,9 +99,7 @@ class HeadlessRoutingTest {
         "Running a routing job in headless mode must not throw any exception");
 
     assertTrue(
-        completedJob.state == RoutingJobState.COMPLETED
-            || completedJob.state == RoutingJobState.CANCELLED
-            || completedJob.state == RoutingJobState.TERMINATED,
+        completedJob.state.isTerminal(),
         "Routing job must reach a terminal state");
   }
 
@@ -179,8 +177,7 @@ class HeadlessRoutingTest {
     long startTime = System.currentTimeMillis();
     long timeoutInMillis = TextManager.parseTimespanString(job.routerSettings.jobTimeoutString) * 1000;
 
-    while ((job.state != RoutingJobState.COMPLETED) && (job.state != RoutingJobState.CANCELLED)
-        && (job.state != RoutingJobState.TERMINATED)) {
+    while (!job.state.isTerminal()) {
       try {
         Thread.sleep(100);
       } catch (InterruptedException e) {
@@ -195,4 +192,3 @@ class HeadlessRoutingTest {
     return job;
   }
 }
-

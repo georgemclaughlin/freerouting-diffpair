@@ -149,6 +149,7 @@ Headless board management (using `BoardManager` and `HeadlessBoardManager`), ses
 ### `app.freerouting.core`
 
 Shared application data such as routing jobs, sessions, scoring, and statistics. The board statistics helpers live in `core.scoring`.
+Routing jobs distinguish a successfully connected board (`COMPLETED`) from a finished run that still has ratsnest items (`INCOMPLETE`). Both states retain final output for inspection; only `COMPLETED` is a successful CLI result.
 
 ### `app.freerouting.settings`
 

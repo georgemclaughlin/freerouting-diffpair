@@ -27,6 +27,8 @@ import app.freerouting.settings.sources.EnvironmentVariablesSource;
 import app.freerouting.settings.sources.JsonFileSettings;
 import app.freerouting.util.TextManager;
 import app.freerouting.util.VersionChecker;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
 import java.awt.Dimension;
 import java.awt.Toolkit;
 import java.io.File;
@@ -61,6 +63,7 @@ import org.glassfish.jersey.servlet.ServletContainer;
 public class Freerouting {
 
   public static final String WEB_URL = "https://www.freerouting.app";
+  static final String CLI_ROUTING_RESULT_PREFIX = "FREEROUTING_RESULT ";
   public static final String VERSION_NUMBER_STRING = "v" + Constants.FREEROUTING_VERSION + " (build-date: "
       + Constants.FREEROUTING_BUILD_DATE + ")";
   public static GlobalSettings globalSettings;
@@ -120,7 +123,7 @@ public class Freerouting {
     routingJob.state = RoutingJobState.READY_TO_START;
 
     // Wait for the RoutingJobScheduler to do its work
-    while ((routingJob.state != RoutingJobState.COMPLETED) && (routingJob.state != RoutingJobState.TERMINATED)) {
+    while (!routingJob.state.isTerminal()) {
       try {
         Thread.sleep(500);
       } catch (InterruptedException _) {
@@ -130,7 +133,7 @@ public class Freerouting {
     }
 
     // Save the output file
-    if (routingJob.state == RoutingJobState.COMPLETED) {
+    if (routingJob.state == RoutingJobState.COMPLETED || routingJob.state == RoutingJobState.INCOMPLETE) {
       try {
         Path outputFilePath = Path.of(globalSettings.initialOutputFile);
         Files.write(outputFilePath, routingJob.output
@@ -156,9 +159,26 @@ public class Freerouting {
             + "╚══════════════════════════════════════════════════════════════════╝"
         );
       }
+
+      if (routingJob.state == RoutingJobState.INCOMPLETE) {
+        FRLogger.warn("Routing finished with " + routingJob.incompleteConnectionCount
+            + " incomplete connection(s); the diagnostic output was written, but the job did not succeed.");
+      }
     }
 
-    return true;
+    IO.println(formatCliRoutingResult(routingJob));
+    return routingJob.state == RoutingJobState.COMPLETED;
+  }
+
+  static String formatCliRoutingResult(RoutingJob routingJob) {
+    JsonObject result = new JsonObject();
+    result.addProperty("state", routingJob.state.name());
+    if (routingJob.incompleteConnectionCount == null) {
+      result.add("incomplete_connection_count", JsonNull.INSTANCE);
+    } else {
+      result.addProperty("incomplete_connection_count", routingJob.incompleteConnectionCount);
+    }
+    return CLI_ROUTING_RESULT_PREFIX + result;
   }
 
   private static boolean InitializeDRC(GlobalSettings globalSettings) {

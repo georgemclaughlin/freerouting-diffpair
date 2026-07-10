@@ -255,7 +255,7 @@ public class JobControllerV1 extends BaseController {
    * or completed job returns HTTP 400.
    * </p>
    */
-  @Operation(summary = "Start routing job", description = "Starts or continues a queued routing job. This is Step 4 of the routing pipeline. Next, poll the status using get_job_details until it is COMPLETED.")
+  @Operation(summary = "Start routing job", description = "Starts or continues a queued routing job. This is Step 4 of the routing pipeline. Next, poll get_job_details until the job reaches a terminal state.")
   @ApiResponses(value = {
       @ApiResponse(responseCode = "200", description = "Job started successfully", content = @Content(mediaType = MediaType.APPLICATION_JSON, schema = @Schema(implementation = RoutingJob.class))),
       @ApiResponse(responseCode = "404", description = "Job not found"),
@@ -619,7 +619,7 @@ public class JobControllerV1 extends BaseController {
   /**
    * Downloads the output file of a routing job in Specctra SES format.
    * <ul>
-   *   <li><b>200 OK</b> — job is {@code COMPLETED}; returns the final SES output.</li>
+   *   <li><b>200 OK</b> — job is {@code COMPLETED} or {@code INCOMPLETE}; returns the final SES output.</li>
    *   <li><b>202 Accepted</b> — job is {@code RUNNING}, {@code PAUSED}, or {@code STOPPING};
    *       returns the partial output generated so far.</li>
    *   <li><b>204 No Content</b> — job is in progress but no output bytes are available yet.</li>
@@ -732,7 +732,7 @@ public class JobControllerV1 extends BaseController {
   /**
    * Downloads the output file of a routing job in KiCad JSON format.
    * <ul>
-   *   <li><b>200 OK</b> — job is {@code COMPLETED}; returns the final JSON output.</li>
+   *   <li><b>200 OK</b> — job is {@code COMPLETED} or {@code INCOMPLETE}; returns the final JSON output.</li>
    *   <li><b>202 Accepted</b> — job is {@code RUNNING}, {@code PAUSED}, or {@code STOPPING};
    *       returns the partial JSON output generated so far.</li>
    *   <li><b>204 No Content</b> — job is in progress but no output bytes are available yet.</li>
@@ -839,7 +839,7 @@ public class JobControllerV1 extends BaseController {
    * A new SSE event is pushed every ~200 ms when the output CRC32 checksum changes.
    * Each event payload is a JSON-serialized {@link app.freerouting.api.dto.BoardFilePayload}
    * with the current Base64-encoded SES data. The stream is closed automatically when the
-   * job transitions to {@code COMPLETED} or {@code CANCELLED}.
+   * job reaches a terminal state.
    * </p>
    */
   @Operation(summary = "Stream job output in real-time", description = "Streams the output file of a routing job in real-time using Server-Sent Events (SSE). Updates are sent every 200ms when the output changes.")
@@ -907,8 +907,8 @@ public class JobControllerV1 extends BaseController {
           }
         }
 
-        // Close the connection if the job is completed or cancelled
-        if (job.state == RoutingJobState.COMPLETED || job.state == RoutingJobState.CANCELLED) {
+        // Close the connection once the job reaches any terminal state.
+        if (job.state.isTerminal()) {
           try {
             eventSink.close();
           } catch (Exception ex) {
@@ -937,7 +937,7 @@ public class JobControllerV1 extends BaseController {
    * A new SSE event is pushed every ~500 ms when the board state changes (detected via CRC32).
    * Each event payload is raw KiCad JSON (not Base64-encoded), making it directly consumable
    * by the KiCad IPC bridge. The stream is closed automatically when the job transitions
-   * to {@code COMPLETED} or {@code CANCELLED}.
+   * to a terminal state.
    * </p>
    */
   @Operation(summary = "Stream job JSON output in real-time", description = "Streams the KiCad JSON output of a routing job in real-time using Server-Sent Events (SSE). "
@@ -990,8 +990,8 @@ public class JobControllerV1 extends BaseController {
           }
         }
 
-        // Close the connection if the job is completed or cancelled
-        if (job.state == RoutingJobState.COMPLETED || job.state == RoutingJobState.CANCELLED) {
+        // Close the connection once the job reaches any terminal state.
+        if (job.state.isTerminal()) {
           try {
             eventSink.close();
           } catch (Exception ex) {
@@ -1066,7 +1066,7 @@ public class JobControllerV1 extends BaseController {
    * <p>
    * An SSE event is pushed each time the job fires a {@code logEntryAdded} event. Each event
    * payload is a JSON-serialized log entry. The connection is closed when the job transitions
-   * to {@code COMPLETED} or {@code CANCELLED}.
+   * to a terminal state.
    * </p>
    */
   @Operation(summary = "Stream job logs in real-time", description = "Streams log entries of a routing job in real-time using Server-Sent Events (SSE). New log entries are sent as they are generated.")
@@ -1115,8 +1115,8 @@ public class JobControllerV1 extends BaseController {
 
         eventSink.send(event);
 
-        // Close the connection if the job is completed or cancelled
-        if (job.state == RoutingJobState.COMPLETED || job.state == RoutingJobState.CANCELLED) {
+        // Close the connection once the job reaches any terminal state.
+        if (job.state.isTerminal()) {
           try {
             eventSink.close();
           } catch (Exception closeEx) {
@@ -1234,5 +1234,3 @@ public class JobControllerV1 extends BaseController {
         .build();
   }
 }
-
-
