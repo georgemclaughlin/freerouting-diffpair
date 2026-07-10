@@ -5,6 +5,7 @@ import app.freerouting.board.Pin;
 import app.freerouting.board.RoutingBoard;
 import app.freerouting.core.Padstack;
 import app.freerouting.geometry.planar.ConvexShape;
+import app.freerouting.geometry.planar.FloatLine;
 import app.freerouting.geometry.planar.FloatPoint;
 import app.freerouting.geometry.planar.IntBox;
 import app.freerouting.geometry.planar.Point;
@@ -132,6 +133,7 @@ public class AutorouteControl {
   IntBox router_intent_local_region;
   IntBox[] router_intent_pair_corridors;
   int[] router_intent_pair_corridor_layers;
+  PairCenterlineGuide[] router_intent_pair_centerline_guides;
   int router_intent_pair_sibling_net_no;
   double router_intent_pair_allowed_length;
   String router_intent_net_name;
@@ -200,6 +202,7 @@ public class AutorouteControl {
     router_intent_local_region = null;
     router_intent_pair_corridors = new IntBox[0];
     router_intent_pair_corridor_layers = new int[0];
+    router_intent_pair_centerline_guides = new PairCenterlineGuide[0];
     router_intent_pair_sibling_net_no = -1;
     router_intent_pair_allowed_length = Double.NaN;
     router_intent_net_name = null;
@@ -324,35 +327,77 @@ public class AutorouteControl {
     router_intent_pair_sibling_net_no = p_sibling_net_no > 0 ? p_sibling_net_no : -1;
   }
 
+  void setRouterIntentPairCenterlineGuides(PairCenterlineGuide[] p_guides) {
+    router_intent_pair_centerline_guides = p_guides != null
+        ? Arrays.copyOf(p_guides, p_guides.length)
+        : new PairCenterlineGuide[0];
+  }
+
   double routerIntentPairCorridorPenalty(FloatPoint p_point, int p_layer) {
     if (p_point == null
-        || router_intent_pair_corridors == null
-        || router_intent_pair_corridors.length == 0
         || p_layer < 0
         || p_layer >= trace_costs.length) {
       return 0.0;
     }
 
+    double averageTraceCost = (trace_costs[p_layer].horizontal + trace_costs[p_layer].vertical) / 2.0;
+    double penalty = 0.0;
+
+    if (router_intent_pair_centerline_guides != null
+        && router_intent_pair_centerline_guides.length > 0) {
+      double centerlineFactor = RouterIntentRoutingPolicy.differentialPairCenterlineBandCostFactor(
+          this.settings.intent,
+          router_intent_net_name);
+      if (centerlineFactor > 0.0) {
+        PairCenterlineGuide nearestGuide = null;
+        double nearestGuideDistance = Double.POSITIVE_INFINITY;
+        for (PairCenterlineGuide guide : router_intent_pair_centerline_guides) {
+          if (guide == null || guide.layer != p_layer) {
+            continue;
+          }
+          double distance = guide.applicableDistance(p_point);
+          if (distance < nearestGuideDistance) {
+            nearestGuideDistance = distance;
+            nearestGuide = guide;
+          }
+        }
+        if (nearestGuide != null && Double.isFinite(nearestGuideDistance)) {
+          double boundedDeviation = nearestGuide.boundedBandDeviation(p_point);
+          if (boundedDeviation > 0.0 && Double.isFinite(boundedDeviation)) {
+            penalty += boundedDeviation * averageTraceCost * centerlineFactor;
+          }
+        }
+      }
+    }
+
+    if (router_intent_pair_corridors == null || router_intent_pair_corridors.length == 0) {
+      return penalty;
+    }
     double factor = RouterIntentRoutingPolicy.differentialPairCorridorExitCostFactor(
         this.settings.intent,
         router_intent_net_name);
     if (factor <= 0.0) {
-      return 0.0;
+      return penalty;
     }
-
     double nearestDistance = Double.MAX_VALUE;
-    for (IntBox corridor : router_intent_pair_corridors) {
+    for (int i = 0; i < router_intent_pair_corridors.length; i++) {
+      IntBox corridor = router_intent_pair_corridors[i];
       if (corridor == null || corridor.is_empty()) {
+        continue;
+      }
+      int corridorLayer = i < router_intent_pair_corridor_layers.length
+          ? router_intent_pair_corridor_layers[i]
+          : -1;
+      if (corridorLayer >= 0 && corridorLayer != p_layer) {
         continue;
       }
       nearestDistance = Math.min(nearestDistance, corridor.distance(p_point));
     }
     if (nearestDistance == Double.MAX_VALUE || nearestDistance <= 0.0) {
-      return 0.0;
+      return penalty;
     }
 
-    double averageTraceCost = (trace_costs[p_layer].horizontal + trace_costs[p_layer].vertical) / 2.0;
-    return nearestDistance * averageTraceCost * factor;
+    return penalty + nearestDistance * averageTraceCost * factor;
   }
 
   double routerIntentPairCorridorRipupCostFactor(Item p_obstacle_item) {
@@ -423,6 +468,72 @@ public class AutorouteControl {
       }
     }
     return false;
+  }
+
+  static final class PairCenterlineGuide {
+    final FloatLine centerline;
+    final int layer;
+    final double targetCenterSpacing;
+    final double tolerance;
+
+    PairCenterlineGuide(
+        FloatLine p_centerline,
+        int p_layer,
+        double p_target_center_spacing,
+        double p_tolerance) {
+      if (p_centerline == null
+          || p_centerline.a == null
+          || p_centerline.b == null
+          || p_layer < 0
+          || !Double.isFinite(p_target_center_spacing)
+          || p_target_center_spacing <= 0.0
+          || !Double.isFinite(p_tolerance)
+          || p_tolerance < 0.0) {
+        throw new IllegalArgumentException("invalid differential-pair centerline guide");
+      }
+      centerline = p_centerline;
+      layer = p_layer;
+      targetCenterSpacing = p_target_center_spacing;
+      tolerance = p_tolerance;
+    }
+
+    double bandDeviation(FloatPoint p_point) {
+      double centerlineDistance = applicableDistance(p_point);
+      if (!Double.isFinite(centerlineDistance)) {
+        return Double.POSITIVE_INFINITY;
+      }
+      double lowerBound = Math.max(0.0, targetCenterSpacing - tolerance);
+      double upperBound = targetCenterSpacing + tolerance;
+      if (centerlineDistance < lowerBound) {
+        return lowerBound - centerlineDistance;
+      }
+      return Math.max(0.0, centerlineDistance - upperBound);
+    }
+
+    double applicableDistance(FloatPoint p_point) {
+      if (p_point == null) {
+        return Double.POSITIVE_INFINITY;
+      }
+      double deltaX = centerline.b.x - centerline.a.x;
+      double deltaY = centerline.b.y - centerline.a.y;
+      double lengthSquared = deltaX * deltaX + deltaY * deltaY;
+      if (lengthSquared <= 0.0) {
+        return Double.POSITIVE_INFINITY;
+      }
+      double projection = ((p_point.x - centerline.a.x) * deltaX
+          + (p_point.y - centerline.a.y) * deltaY) / lengthSquared;
+      if (projection < 0.0 || projection > 1.0) {
+        return Double.POSITIVE_INFINITY;
+      }
+      return centerline.segment_distance(p_point);
+    }
+
+    double boundedBandDeviation(FloatPoint p_point) {
+      double deviation = bandDeviation(p_point);
+      return Double.isFinite(deviation)
+          ? Math.min(deviation, targetCenterSpacing)
+          : Double.POSITIVE_INFINITY;
+    }
   }
 
   private static boolean isPureSmdNet(RoutingBoard p_board, int p_net_no) {

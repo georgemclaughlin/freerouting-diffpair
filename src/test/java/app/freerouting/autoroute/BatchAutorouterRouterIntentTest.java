@@ -9,6 +9,7 @@ import app.freerouting.board.FixedState;
 import app.freerouting.board.RoutingBoard;
 import app.freerouting.board.Trace;
 import app.freerouting.board.Unit;
+import app.freerouting.geometry.planar.FloatLine;
 import app.freerouting.geometry.planar.FloatPoint;
 import app.freerouting.geometry.planar.IntBox;
 import app.freerouting.geometry.planar.IntPoint;
@@ -166,7 +167,7 @@ class BatchAutorouterRouterIntentTest {
     Net negative = board.rules.nets.get(USB_D_MINUS, 1);
     assertNotNull(positive);
     assertNotNull(negative);
-    insertSiblingTrace(board, positive, 1);
+    Trace siblingTrace = insertSiblingTrace(board, positive, 1);
 
     RouterSettings settings = routerSettings(board);
     BatchAutorouter router = new BatchAutorouter(
@@ -178,18 +179,291 @@ class BatchAutorouterRouterIntentTest {
         settings.get_start_ripup_costs(),
         500);
 
-    IntBox[] corridors = router.routedDifferentialPairSiblingCorridors(settings.intent, USB_D_MINUS);
     AutorouteControl control = new AutorouteControl(
         board,
         negative.net_number,
         settings,
         settings.get_via_costs(),
         router.traceCostsForRouterIntent(negative.net_number));
+    IntBox[] corridors = router.routedDifferentialPairSiblingCorridors(
+        control,
+        settings.intent,
+        USB_D_MINUS);
     control.setRouterIntentPairCorridors(corridors);
 
     assertEquals(1, corridors.length);
+    IntBox legacyCorridor = siblingTrace.bounding_box().offset(siblingTrace.get_half_width() * 3.0);
+    assertEquals(legacyCorridor.ll, corridors[0].ll);
+    assertEquals(legacyCorridor.ur, corridors[0].ur);
     assertEquals(0.0, control.routerIntentPairCorridorPenalty(new FloatPoint(50_000, -20_000), 1));
     assertTrue(control.routerIntentPairCorridorPenalty(new FloatPoint(50_000, -50_000), 1) > 0.0);
+  }
+
+  @Test
+  void coupledPairCenterlineGuidePenalizesPointsHiddenInsideDiagonalTraceBounds() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net positive = board.rules.nets.get(USB_D_PLUS, 1);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(positive);
+    assertNotNull(negative);
+    insertTrace(
+        board,
+        positive,
+        1,
+        new Point[] {
+            new IntPoint(10_000, -10_000),
+            new IntPoint(90_000, -50_000)
+        });
+
+    RouterSettings settings = routerSettings(board, coupledDifferentialPairIntent(1.0, 0.1));
+    BatchAutorouter router = new BatchAutorouter(
+        null,
+        board,
+        settings,
+        true,
+        false,
+        settings.get_start_ripup_costs(),
+        500);
+    AutorouteControl control = new AutorouteControl(
+        board,
+        negative.net_number,
+        settings,
+        settings.get_via_costs(),
+        router.traceCostsForRouterIntent(negative.net_number));
+
+    router.applyRouterIntentPairCorridors(control, settings.intent, USB_D_MINUS);
+
+    FloatPoint pointInsideWholeTraceBounds = new FloatPoint(50_000, -10_000);
+    assertEquals(1, control.router_intent_pair_centerline_guides.length);
+    assertEquals(0.0, control.router_intent_pair_corridors[0].distance(pointInsideWholeTraceBounds));
+    assertTrue(control.routerIntentPairCorridorPenalty(pointInsideWholeTraceBounds, 1) > 0.0);
+    assertEquals(0.0, control.routerIntentPairCorridorPenalty(pointInsideWholeTraceBounds, 0));
+  }
+
+  @Test
+  void coupledPairCenterlineBandUsesTargetGapAndBothTraceHalfWidths() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net positive = board.rules.nets.get(USB_D_PLUS, 1);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(positive);
+    assertNotNull(negative);
+    Trace siblingTrace = insertSiblingTrace(board, positive, 1);
+
+    double targetGapMm = 1.0;
+    double toleranceMm = 0.2;
+    RouterSettings settings = routerSettings(
+        board,
+        coupledDifferentialPairIntent(targetGapMm, toleranceMm));
+    BatchAutorouter router = new BatchAutorouter(
+        null,
+        board,
+        settings,
+        true,
+        false,
+        settings.get_start_ripup_costs(),
+        500);
+    AutorouteControl control = new AutorouteControl(
+        board,
+        negative.net_number,
+        settings,
+        settings.get_via_costs(),
+        router.traceCostsForRouterIntent(negative.net_number));
+
+    router.applyRouterIntentPairCorridors(control, settings.intent, USB_D_MINUS);
+
+    assertEquals(1, control.router_intent_pair_centerline_guides.length);
+    AutorouteControl.PairCenterlineGuide guide = control.router_intent_pair_centerline_guides[0];
+    double mmResolution = board.communication.get_resolution(Unit.MM);
+    double expectedCenterSpacing = targetGapMm * mmResolution
+        + control.trace_half_width[1]
+        + siblingTrace.get_half_width();
+    double expectedTolerance = toleranceMm * mmResolution;
+    assertEquals(expectedCenterSpacing, guide.targetCenterSpacing, 1e-6);
+    assertEquals(expectedTolerance, guide.tolerance, 1e-6);
+
+    FloatPoint targetPoint = new FloatPoint(50_000, -20_000 + expectedCenterSpacing);
+    FloatPoint insideBand = new FloatPoint(
+        50_000,
+        -20_000 + expectedCenterSpacing + expectedTolerance * 0.5);
+    FloatPoint outsideBand = new FloatPoint(
+        50_000,
+        -20_000 + expectedCenterSpacing + expectedTolerance + 0.5 * mmResolution);
+    FloatPoint tooClose = new FloatPoint(
+        50_000,
+        -20_000 + expectedCenterSpacing - expectedTolerance - 0.5 * mmResolution);
+    FloatPoint beyondGuideEnd = new FloatPoint(
+        95_000,
+        -20_000 + expectedCenterSpacing + expectedTolerance + 0.5 * mmResolution);
+    FloatPoint farOutsideBand = new FloatPoint(
+        50_000,
+        -20_000 + expectedCenterSpacing + expectedTolerance + 5.0 * mmResolution);
+    assertEquals(0.0, guide.bandDeviation(targetPoint), 1e-6);
+    assertEquals(0.0, guide.bandDeviation(insideBand), 1e-6);
+    assertEquals(0.0, control.router_intent_pair_corridors[0].distance(targetPoint), 1e-6);
+    assertEquals(0.0, control.router_intent_pair_corridors[0].distance(insideBand), 1e-6);
+    assertTrue(control.router_intent_pair_corridors[0].distance(outsideBand) > 0.0);
+    assertEquals(0.0, control.routerIntentPairCorridorPenalty(targetPoint, 1), 1e-6);
+    assertEquals(0.0, control.routerIntentPairCorridorPenalty(insideBand, 1), 1e-6);
+    assertTrue(control.routerIntentPairCorridorPenalty(outsideBand, 1) > 0.0);
+    assertTrue(control.routerIntentPairCorridorPenalty(tooClose, 1) > 0.0);
+    assertTrue(control.routerIntentPairCorridorPenalty(beyondGuideEnd, 1) > 0.0);
+    assertTrue(
+        control.routerIntentPairCorridorPenalty(farOutsideBand, 1)
+            > control.routerIntentPairCorridorPenalty(outsideBand, 1));
+    assertEquals(0.0, control.routerIntentPairCorridorPenalty(outsideBand, 0), 1e-6);
+  }
+
+  @Test
+  void outOfSpanSiblingSegmentDoesNotMaskApplicableCenterlinePenalty() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(negative);
+
+    RouterSettings settings = routerSettings(board, coupledDifferentialPairIntent(1.0, 0.1));
+    AutorouteControl control = new AutorouteControl(
+        board,
+        negative.net_number,
+        settings,
+        settings.get_via_costs(),
+        settings.get_trace_cost_arr());
+    control.setRouterIntentPairCenterlineGuides(new AutorouteControl.PairCenterlineGuide[] {
+        new AutorouteControl.PairCenterlineGuide(
+            new FloatLine(
+                new FloatPoint(10_000, -20_000),
+                new FloatPoint(90_000, -20_000)),
+            1,
+            10_000,
+            1_000),
+        new AutorouteControl.PairCenterlineGuide(
+            new FloatLine(
+                new FloatPoint(10_000, -40_000),
+                new FloatPoint(20_000, -40_000)),
+            1,
+            10_000,
+            1_000)
+    });
+
+    double averageLayerTraceCost = (
+        control.trace_costs[1].horizontal + control.trace_costs[1].vertical) / 2.0;
+    assertEquals(
+        10_000 * averageLayerTraceCost * 2.5,
+        control.routerIntentPairCorridorPenalty(new FloatPoint(50_000, -50_000), 1),
+        1e-6);
+  }
+
+  @Test
+  void centerlineAndCorridorExitPenaltiesAccumulate() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(negative);
+
+    RouterSettings settings = routerSettings(board, coupledDifferentialPairIntent(1.0, 0.1));
+    AutorouteControl control = new AutorouteControl(
+        board,
+        negative.net_number,
+        settings,
+        settings.get_via_costs(),
+        settings.get_trace_cost_arr());
+    control.setRouterIntentPairCenterlineGuides(new AutorouteControl.PairCenterlineGuide[] {
+        horizontalGuide(0, 0, 100_000, 10_000, 1_000)
+    });
+    control.setRouterIntentPairCorridors(
+        new IntBox[] { new IntBox(0, -5_000, 100_000, 5_000) },
+        new int[] { 1 },
+        -1);
+
+    FloatPoint point = new FloatPoint(50_000, 30_000);
+    double averageLayerTraceCost = (
+        control.trace_costs[1].horizontal + control.trace_costs[1].vertical) / 2.0;
+    double centerlinePenalty = 10_000 * averageLayerTraceCost
+        * RouterIntentRoutingPolicy.differentialPairCenterlineBandCostFactor(settings.intent, USB_D_MINUS);
+    double corridorPenalty = 25_000 * averageLayerTraceCost
+        * RouterIntentRoutingPolicy.differentialPairCorridorExitCostFactor(settings.intent, USB_D_MINUS);
+
+    assertEquals(
+        centerlinePenalty + corridorPenalty,
+        control.routerIntentPairCorridorPenalty(point, 1),
+        1e-6);
+  }
+
+  @Test
+  void nearestParallelCenterlineWinsEvenWhenFarGuideHasLowerBandDeviation() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(negative);
+
+    RouterSettings settings = routerSettings(board, coupledDifferentialPairIntent(1.0, 0.1));
+    AutorouteControl control = new AutorouteControl(
+        board,
+        negative.net_number,
+        settings,
+        settings.get_via_costs(),
+        settings.get_trace_cost_arr());
+    AutorouteControl.PairCenterlineGuide nearGuide = horizontalGuide(
+        0, 0, 100_000, 10_000, 1_000);
+    AutorouteControl.PairCenterlineGuide fartherGuide = horizontalGuide(
+        0, 12_000, 100_000, 10_000, 1_000);
+    control.setRouterIntentPairCenterlineGuides(new AutorouteControl.PairCenterlineGuide[] {
+        nearGuide,
+        fartherGuide
+    });
+
+    FloatPoint point = new FloatPoint(50_000, 2_000);
+    assertEquals(2_000, nearGuide.applicableDistance(point), 1e-6);
+    assertEquals(10_000, fartherGuide.applicableDistance(point), 1e-6);
+    assertEquals(7_000, nearGuide.bandDeviation(point), 1e-6);
+    assertEquals(0.0, fartherGuide.bandDeviation(point), 1e-6);
+    assertTrue(control.routerIntentPairCorridorPenalty(point, 1) > 0.0);
+  }
+
+  @Test
+  void nearestFoldedCenterlineSegmentWinsAcrossOverlappingSpans() throws Exception {
+    RoutingBoard board = loadBoard(TWO_LAYER_PAIR_DSN);
+    Net negative = board.rules.nets.get(USB_D_MINUS, 1);
+    assertNotNull(negative);
+
+    RouterSettings settings = routerSettings(board, coupledDifferentialPairIntent(1.0, 0.1));
+    AutorouteControl control = new AutorouteControl(
+        board,
+        negative.net_number,
+        settings,
+        settings.get_via_costs(),
+        settings.get_trace_cost_arr());
+    AutorouteControl.PairCenterlineGuide horizontal = horizontalGuide(
+        0, 0, 100_000, 10_000, 1_000);
+    AutorouteControl.PairCenterlineGuide vertical = new AutorouteControl.PairCenterlineGuide(
+        new FloatLine(
+            new FloatPoint(50_000, 0),
+            new FloatPoint(50_000, 100_000)),
+        1,
+        10_000,
+        1_000);
+    control.setRouterIntentPairCenterlineGuides(new AutorouteControl.PairCenterlineGuide[] {
+        horizontal,
+        vertical
+    });
+
+    FloatPoint point = new FloatPoint(52_000, 10_000);
+    assertEquals(10_000, horizontal.applicableDistance(point), 1e-6);
+    assertEquals(2_000, vertical.applicableDistance(point), 1e-6);
+    assertEquals(0.0, horizontal.bandDeviation(point), 1e-6);
+    assertEquals(7_000, vertical.bandDeviation(point), 1e-6);
+    assertTrue(control.routerIntentPairCorridorPenalty(point, 1) > 0.0);
+  }
+
+  @Test
+  void centerlineBandDeviationSaturatesAtOneTargetSpacing() {
+    AutorouteControl.PairCenterlineGuide guide = new AutorouteControl.PairCenterlineGuide(
+        new FloatLine(
+            new FloatPoint(10_000, -20_000),
+            new FloatPoint(90_000, -20_000)),
+        1,
+        10_000,
+        1_000);
+
+    assertEquals(10_000, guide.boundedBandDeviation(new FloatPoint(50_000, -100_000)), 1e-6);
+    assertEquals(0.0, guide.boundedBandDeviation(new FloatPoint(50_000, -30_000)), 1e-6);
+    assertTrue(Double.isInfinite(guide.boundedBandDeviation(new FloatPoint(95_000, -100_000))));
   }
 
   @Test
@@ -402,6 +676,30 @@ class BatchAutorouterRouterIntentTest {
     RouterIntentSettings intent = new RouterIntentSettings();
     intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
     return intent;
+  }
+
+  private RouterIntentSettings coupledDifferentialPairIntent(double targetGapMm, double toleranceMm) {
+    RouterIntentSettings intent = differentialPairIntent();
+    RouterIntentSettings.DifferentialPairIntent pair = intent.differentialPairs[0];
+    pair.routeAsCoupledPair = true;
+    pair.targetGapMm = targetGapMm;
+    pair.gapToleranceMm = toleranceMm;
+    return intent;
+  }
+
+  private static AutorouteControl.PairCenterlineGuide horizontalGuide(
+      double startX,
+      double y,
+      double endX,
+      double targetCenterSpacing,
+      double tolerance) {
+    return new AutorouteControl.PairCenterlineGuide(
+        new FloatLine(
+            new FloatPoint(startX, y),
+            new FloatPoint(endX, y)),
+        1,
+        targetCenterSpacing,
+        tolerance);
   }
 
   private static RoutingBoard loadBoard(String dsn) throws Exception {

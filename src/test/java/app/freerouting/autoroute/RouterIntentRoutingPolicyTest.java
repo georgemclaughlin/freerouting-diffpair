@@ -335,6 +335,34 @@ class RouterIntentRoutingPolicyTest {
   }
 
   @Test
+  void coupledDifferentialPairUsesSeparateSoftCenterlineBandCost() {
+    RouterIntentSettings intent = intentWith(
+        netIntent(
+            "USB_D_PLUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL),
+        netIntent(
+            "USB_D_MINUS",
+            RouterIntentSettings.Priority.CRITICAL,
+            RouterIntentSettings.Scope.GLOBAL,
+            RouterIntentSettings.RipupProtection.CRITICAL));
+    RouterIntentSettings.DifferentialPairIntent pair = differentialPair("usb2_data", "USB_D_PLUS", "USB_D_MINUS");
+    pair.routeAsCoupledPair = true;
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
+
+    double centerlineFactor = RouterIntentRoutingPolicy.differentialPairCenterlineBandCostFactor(
+        intent,
+        "USB_D_PLUS");
+    double corridorFactor = RouterIntentRoutingPolicy.differentialPairCorridorExitCostFactor(
+        intent,
+        "USB_D_PLUS");
+    assertEquals(2.5, centerlineFactor);
+    assertTrue(centerlineFactor < corridorFactor);
+    assertEquals(0.0, RouterIntentRoutingPolicy.differentialPairCenterlineBandCostFactor(intent, "VBUS"));
+  }
+
+  @Test
   void differentialPairCorridorObstacleRipupCostFactorOnlyDiscountsPairMemberRoutes() {
     RouterIntentSettings intent = intentWith(
         netIntent(

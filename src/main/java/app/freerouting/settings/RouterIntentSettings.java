@@ -396,6 +396,16 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return pair == null ? null : pair.maxSkewMm;
   }
 
+  public Double differentialPairTargetGapMmForNet(String netName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    return pair == null ? null : pair.targetGapMm;
+  }
+
+  public Double differentialPairGapToleranceMmForNet(String netName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    return pair == null ? null : pair.gapToleranceMm;
+  }
+
   public boolean isHardDifferentialPairLayerForNet(String netName, String layerName) {
     DifferentialPairIntent pair = differentialPairForNet(netName);
     if (pair == null || !Boolean.TRUE.equals(pair.sameLayerRequired) || pair.allowedLayers == null

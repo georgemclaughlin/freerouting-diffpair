@@ -1736,14 +1736,28 @@ public class BatchAutorouter extends NamedAlgorithm {
     return result;
   }
 
-  IntBox[] routedDifferentialPairSiblingCorridors(RouterIntentSettings intent, String routeNetName) {
+  IntBox[] routedDifferentialPairSiblingCorridors(
+      AutorouteControl control,
+      RouterIntentSettings intent,
+      String routeNetName) {
     List<IntBox> result = new ArrayList<>();
     for (Trace trace : routedDifferentialPairSiblingTraces(intent, routeNetName)) {
       IntBox box = trace.bounding_box();
       if (box == null || box.is_empty()) {
         continue;
       }
-      result.add(box.offset(trace.get_half_width() * DIFFERENTIAL_PAIR_CORRIDOR_HALF_WIDTH_FACTOR));
+      double corridorHalfWidth = trace.get_half_width() * DIFFERENTIAL_PAIR_CORRIDOR_HALF_WIDTH_FACTOR;
+      DifferentialPairSpacingBand spacingBand = coupledDifferentialPairSpacingBand(
+          control,
+          intent,
+          routeNetName,
+          trace);
+      if (spacingBand != null) {
+        corridorHalfWidth = Math.max(
+            corridorHalfWidth,
+            spacingBand.targetCenterSpacing() + spacingBand.tolerance());
+      }
+      result.add(box.offset(corridorHalfWidth));
     }
     return result.toArray(new IntBox[0]);
   }
@@ -1760,6 +1774,45 @@ public class BatchAutorouter extends NamedAlgorithm {
     return result.stream().mapToInt(Integer::intValue).toArray();
   }
 
+  AutorouteControl.PairCenterlineGuide[] routedDifferentialPairSiblingCenterlineGuides(
+      AutorouteControl control,
+      RouterIntentSettings intent,
+      String routeNetName) {
+    if (control == null) {
+      return new AutorouteControl.PairCenterlineGuide[0];
+    }
+
+    List<AutorouteControl.PairCenterlineGuide> result = new ArrayList<>();
+    for (Trace trace : routedDifferentialPairSiblingTraces(intent, routeNetName)) {
+      if (!(trace instanceof PolylineTrace polylineTrace)) {
+        continue;
+      }
+      DifferentialPairSpacingBand spacingBand = coupledDifferentialPairSpacingBand(
+          control,
+          intent,
+          routeNetName,
+          trace);
+      if (spacingBand == null) {
+        continue;
+      }
+      int layer = trace.get_layer();
+      FloatPoint[] corners = polylineTrace.polyline().corner_approx_arr();
+      for (int i = 1; i < corners.length; i++) {
+        FloatPoint start = corners[i - 1];
+        FloatPoint end = corners[i];
+        if (start == null || end == null || start.distance(end) <= 1e-6) {
+          continue;
+        }
+        result.add(new AutorouteControl.PairCenterlineGuide(
+            new FloatLine(start, end),
+            layer,
+            spacingBand.targetCenterSpacing(),
+            spacingBand.tolerance()));
+      }
+    }
+    return result.toArray(new AutorouteControl.PairCenterlineGuide[0]);
+  }
+
   void applyRouterIntentPairCorridors(
       AutorouteControl control,
       RouterIntentSettings intent,
@@ -1768,9 +1821,61 @@ public class BatchAutorouter extends NamedAlgorithm {
       return;
     }
     control.setRouterIntentPairCorridors(
-        routedDifferentialPairSiblingCorridors(intent, routeNetName),
+        routedDifferentialPairSiblingCorridors(control, intent, routeNetName),
         routedDifferentialPairSiblingCorridorLayers(intent, routeNetName),
         differentialPairSiblingNetNumber(intent, routeNetName));
+    control.setRouterIntentPairCenterlineGuides(
+        routedDifferentialPairSiblingCenterlineGuides(control, intent, routeNetName));
+  }
+
+  private DifferentialPairSpacingBand coupledDifferentialPairSpacingBand(
+      AutorouteControl control,
+      RouterIntentSettings intent,
+      String routeNetName,
+      Trace siblingTrace) {
+    if (control == null
+        || intent == null
+        || routeNetName == null
+        || siblingTrace == null
+        || !intent.requiresCoupledDifferentialPairRoute(routeNetName)
+        || this.board == null
+        || this.board.communication == null) {
+      return null;
+    }
+
+    int layer = siblingTrace.get_layer();
+    if (layer < 0 || layer >= control.trace_half_width.length) {
+      return null;
+    }
+    Double targetGapMm = intent.differentialPairTargetGapMmForNet(routeNetName);
+    if (targetGapMm == null || !Double.isFinite(targetGapMm) || targetGapMm < 0.0) {
+      return null;
+    }
+    double mmResolution = this.board.communication.get_resolution(Unit.MM);
+    if (!Double.isFinite(mmResolution) || mmResolution <= 0.0) {
+      return null;
+    }
+
+    Double configuredToleranceMm = intent.differentialPairGapToleranceMmForNet(routeNetName);
+    double toleranceMm = configuredToleranceMm != null
+        && Double.isFinite(configuredToleranceMm)
+        && configuredToleranceMm >= 0.0
+        ? configuredToleranceMm
+        : 0.0;
+    double targetCenterSpacing = targetGapMm * mmResolution
+        + control.trace_half_width[layer]
+        + siblingTrace.get_half_width();
+    double tolerance = toleranceMm * mmResolution;
+    if (!Double.isFinite(targetCenterSpacing)
+        || targetCenterSpacing <= 0.0
+        || !Double.isFinite(tolerance)
+        || tolerance < 0.0) {
+      return null;
+    }
+    return new DifferentialPairSpacingBand(targetCenterSpacing, tolerance);
+  }
+
+  private record DifferentialPairSpacingBand(double targetCenterSpacing, double tolerance) {
   }
 
   void applyRouterIntentPairViaTransitionCosts(
