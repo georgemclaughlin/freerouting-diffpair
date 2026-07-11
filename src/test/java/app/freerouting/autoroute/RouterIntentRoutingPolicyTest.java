@@ -122,7 +122,7 @@ class RouterIntentRoutingPolicyTest {
             RouterIntentSettings.RipupProtection.CRITICAL));
     RouterIntentSettings.DifferentialPairIntent pair = differentialPair("usb2_data", "USB_D_PLUS", "USB_D_MINUS");
     pair.allowedLayers = new String[] { "F.Cu" };
-    pair.sameLayerRequired = true;
+    pair.sameLayerRequired = false;
     intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
     AutorouteControl.ExpansionCostFactor base = new AutorouteControl.ExpansionCostFactor(2.0, 3.0);
 

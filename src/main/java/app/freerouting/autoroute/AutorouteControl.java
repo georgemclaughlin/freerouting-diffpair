@@ -136,6 +136,10 @@ public class AutorouteControl {
   PairCenterlineGuide[] router_intent_pair_centerline_guides;
   int router_intent_pair_sibling_net_no;
   double router_intent_pair_allowed_length;
+  FloatPoint[] router_intent_pair_locate_guide_path;
+  int router_intent_pair_locate_guide_layer;
+  int router_intent_pair_locate_guide_side;
+  double router_intent_pair_locate_guide_spacing;
   String router_intent_net_name;
  
   /**
@@ -205,6 +209,10 @@ public class AutorouteControl {
     router_intent_pair_centerline_guides = new PairCenterlineGuide[0];
     router_intent_pair_sibling_net_no = -1;
     router_intent_pair_allowed_length = Double.NaN;
+    router_intent_pair_locate_guide_path = new FloatPoint[0];
+    router_intent_pair_locate_guide_layer = -1;
+    router_intent_pair_locate_guide_side = 0;
+    router_intent_pair_locate_guide_spacing = Double.NaN;
     router_intent_net_name = null;
   }
 
@@ -331,6 +339,38 @@ public class AutorouteControl {
     router_intent_pair_centerline_guides = p_guides != null
         ? Arrays.copyOf(p_guides, p_guides.length)
         : new PairCenterlineGuide[0];
+  }
+
+  void setRouterIntentPairLocateGuide(
+      FloatPoint[] p_path,
+      int p_layer,
+      int p_side,
+      double p_spacing) {
+    if (p_path == null
+        || p_path.length < 2
+        || p_layer < 0
+        || p_layer >= layer_count
+        || (p_side != -1 && p_side != 1)
+        || !Double.isFinite(p_spacing)
+        || p_spacing <= 0.0) {
+      router_intent_pair_locate_guide_path = new FloatPoint[0];
+      router_intent_pair_locate_guide_layer = -1;
+      router_intent_pair_locate_guide_side = 0;
+      router_intent_pair_locate_guide_spacing = Double.NaN;
+      return;
+    }
+    router_intent_pair_locate_guide_path = Arrays.copyOf(p_path, p_path.length);
+    router_intent_pair_locate_guide_layer = p_layer;
+    router_intent_pair_locate_guide_side = p_side;
+    router_intent_pair_locate_guide_spacing = p_spacing;
+  }
+
+  boolean hasRouterIntentPairLocateGuide() {
+    return router_intent_pair_locate_guide_path.length >= 2
+        && router_intent_pair_locate_guide_layer >= 0
+        && router_intent_pair_locate_guide_side != 0
+        && Double.isFinite(router_intent_pair_locate_guide_spacing)
+        && router_intent_pair_locate_guide_spacing > 0.0;
   }
 
   double routerIntentPairCorridorPenalty(FloatPoint p_point, int p_layer) {

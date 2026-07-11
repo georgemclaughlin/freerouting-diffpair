@@ -66,7 +66,7 @@ public class RoutingJob implements Serializable, Comparable<RoutingJob> {
   public Instant finishedAt;
   @SerializedName("state")
   @Schema(description = "The current state of the job")
-  public RoutingJobState state = RoutingJobState.INVALID;
+  public volatile RoutingJobState state = RoutingJobState.INVALID;
   @SerializedName("stage")
   @Schema(description = "The current stage of the job")
   public RoutingStage stage = RoutingStage.IDLE;

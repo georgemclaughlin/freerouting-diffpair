@@ -858,39 +858,6 @@ public class Polyline implements Serializable {
       return null;
     }
     Point new_end_corner = this.arr[p_line_no].intersection(p_end_line);
-    FRLogger.trace(
-        "Polyline.split",
-        "compare_trace_split_called",
-        "p_line_no="
-            + p_line_no
-            + ", arr.length="
-            + arr.length
-            + ", arr.length-2="
-            + (arr.length - 2)
-            + ", new_end_corner="
-            + debug_point(new_end_corner)
-            + " (type="
-            + new_end_corner.getClass().getSimpleName()
-            + ")"
-            + ", last_corner="
-            + debug_point(this.last_corner())
-            + " (type="
-            + this.last_corner().getClass().getSimpleName()
-            + ")"
-            + ", equals="
-            + new_end_corner.equals(this.last_corner()),
-        "Polyline split p_line_no=" + p_line_no,
-        new Point[] { this.first_corner(), new_end_corner, this.last_corner() });
-    StringBuilder sb = new StringBuilder("    CORNERS:");
-    for (int i = 0; i < this.corner_count(); i++) {
-      sb.append(" ").append(this.corner_approx(i));
-    }
-    FRLogger.trace(
-        "Polyline.split",
-        "compare_trace_split_corners",
-        sb.toString(),
-        "Polyline split p_line_no=" + p_line_no,
-        new Point[] { this.first_corner(), new_end_corner, this.last_corner() });
     if (p_line_no == 1 && same_corner_for_split(new_end_corner, this.first_corner())
         || p_line_no >= arr.length - 2 && same_corner_for_split(new_end_corner, this.last_corner())) {
       // No split, if p_end_line does not intersect, but touches
@@ -965,13 +932,6 @@ public class Polyline implements Serializable {
       }
     }
     return false;
-  }
-
-  private static String debug_point(Point p_point) {
-    if (p_point instanceof IntPoint intPoint) {
-      return "(" + intPoint.x + "," + intPoint.y + ")";
-    }
-    return String.valueOf(p_point);
   }
 
   /**

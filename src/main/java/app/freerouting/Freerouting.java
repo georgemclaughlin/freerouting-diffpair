@@ -14,11 +14,13 @@ import app.freerouting.gui.DefaultExceptionHandler;
 import app.freerouting.gui.GuiManager;
 import app.freerouting.logger.FRLogger;
 import app.freerouting.management.BoardLoader;
+import app.freerouting.management.RoutingJobScheduler;
 import app.freerouting.management.SessionManager;
 import app.freerouting.management.analytics.FRAnalytics;
 import app.freerouting.settings.ApiServerSettings;
 import app.freerouting.settings.GlobalSettings;
 import app.freerouting.settings.McpServerSettings;
+import app.freerouting.settings.RouterApplicationReceipt;
 import app.freerouting.settings.SettingsMerger;
 import app.freerouting.settings.sources.CliSettings;
 import app.freerouting.settings.sources.DefaultSettings;
@@ -71,6 +73,8 @@ public class Freerouting {
   private static Server apiServer; // API server instance
   private static Server mcpServer; // MCP server instance
   private static java.io.PrintStream originalSystemOut;
+  private static final long CLI_SCHEDULER_START_TIMEOUT_MILLIS = 30_000;
+  private static final long CLI_SCHEDULER_POLL_MILLIS = 500;
 
   private static boolean InitializeCLI(GlobalSettings globalSettings) {
     if ((globalSettings.initialInputFile == null) || (globalSettings.initialOutputFile == null)) {
@@ -103,8 +107,6 @@ public class Freerouting {
       return false;
     }
 
-    cliSession.addJob(routingJob);
-
     var desiredOutputFile = new File(globalSettings.initialOutputFile);
     if ((desiredOutputFile != null) && desiredOutputFile.exists()) {
       if (!desiredOutputFile.delete()) {
@@ -120,17 +122,12 @@ public class Freerouting {
 
     routingJob.routerSettings = settingsMerger.merge();
     routingJob.drcSettings = Freerouting.globalSettings.drcSettings.clone();
-    routingJob.state = RoutingJobState.READY_TO_START;
+    cliSession.addReadyJob(routingJob);
 
-    // Wait for the RoutingJobScheduler to do its work
-    while (!routingJob.state.isTerminal()) {
-      try {
-        Thread.sleep(500);
-      } catch (InterruptedException _) {
-        routingJob.state = RoutingJobState.CANCELLED;
-        break;
-      }
-    }
+    awaitCliRoutingJob(
+        routingJob,
+        CLI_SCHEDULER_START_TIMEOUT_MILLIS,
+        CLI_SCHEDULER_POLL_MILLIS);
 
     // Save the output file
     if (routingJob.state == RoutingJobState.COMPLETED || routingJob.state == RoutingJobState.INCOMPLETE) {
@@ -171,6 +168,35 @@ public class Freerouting {
   }
 
   static String formatCliRoutingResult(RoutingJob routingJob) {
+    String routerArtifactSha256 = routingJob.routerSettings != null && routingJob.routerSettings.intent != null
+        ? runningArtifactSha256()
+        : null;
+    return formatCliRoutingResult(routingJob, routerArtifactSha256);
+  }
+
+  static void awaitCliRoutingJob(RoutingJob routingJob, long startTimeoutMillis, long pollMillis) {
+    long startDeadline = System.nanoTime() + startTimeoutMillis * 1_000_000L;
+    boolean schedulerStarted = routingJob.state == RoutingJobState.RUNNING;
+    while (!routingJob.state.isTerminal()) {
+      schedulerStarted = schedulerStarted || routingJob.state == RoutingJobState.RUNNING;
+      if (!schedulerStarted && System.nanoTime() >= startDeadline) {
+        if (RoutingJobScheduler.getInstance().terminateReadyJobIfUnclaimed(routingJob)) {
+          FRLogger.error("RoutingJobScheduler did not start the CLI job within " + startTimeoutMillis + " ms", null);
+          break;
+        }
+        schedulerStarted = routingJob.state == RoutingJobState.RUNNING;
+      }
+      try {
+        Thread.sleep(pollMillis);
+      } catch (InterruptedException _) {
+        routingJob.state = RoutingJobState.CANCELLED;
+        Thread.currentThread().interrupt();
+        break;
+      }
+    }
+  }
+
+  static String formatCliRoutingResult(RoutingJob routingJob, String routerArtifactSha256) {
     JsonObject result = new JsonObject();
     result.addProperty("state", routingJob.state.name());
     if (routingJob.incompleteConnectionCount == null) {
@@ -178,7 +204,28 @@ public class Freerouting {
     } else {
       result.addProperty("incomplete_connection_count", routingJob.incompleteConnectionCount);
     }
+    if (routingJob.routerSettings != null && routingJob.routerSettings.intent != null) {
+      result.add(
+          "router_application_receipt",
+          RouterApplicationReceipt.create(routingJob.routerSettings.intent, routerArtifactSha256));
+    }
     return CLI_ROUTING_RESULT_PREFIX + result;
+  }
+
+  private static String runningArtifactSha256() {
+    try {
+      var codeSource = Freerouting.class.getProtectionDomain().getCodeSource();
+      if (codeSource == null || codeSource.getLocation() == null) {
+        throw new IllegalStateException("running Freerouting artifact location is unavailable");
+      }
+      Path artifact = Path.of(codeSource.getLocation().toURI()).toAbsolutePath().normalize();
+      if (!Files.isRegularFile(artifact)) {
+        throw new IllegalStateException("running Freerouting artifact is not a regular file: " + artifact);
+      }
+      return RouterApplicationReceipt.sha256(artifact);
+    } catch (Exception e) {
+      throw new IllegalStateException("could not identify the running Freerouting artifact", e);
+    }
   }
 
   private static boolean InitializeDRC(GlobalSettings globalSettings) {

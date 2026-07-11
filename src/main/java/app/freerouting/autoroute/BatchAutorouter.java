@@ -35,8 +35,10 @@ import app.freerouting.settings.RouterSettings;
 import com.sun.management.ThreadMXBean;
 import java.lang.management.ManagementFactory;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
@@ -584,98 +586,9 @@ public class BatchAutorouter extends NamedAlgorithm {
           // Use a fresh set per item to mirror v1.9 behavior and avoid cross-item side effects.
           SortedSet<Item> ripped_item_list = new TreeSet<>();
           Map<Item, Integer> ripped_item_costs = new LinkedHashMap<>();
-          int netItemsBefore = board.get_connectable_items(curr_item.get_net_no(i)).size();
           PerformanceProfiler.start("autoroute_item");
           var autorouterResult = autoroute_item(curr_item, curr_item.get_net_no(i), ripped_item_list, ripped_item_costs, p_pass_no);
           PerformanceProfiler.end("autoroute_item");
-          if (!ripped_item_list.isEmpty()) {
-            for (Item rippedItem : ripped_item_list) {
-              StringBuilder rippedNets = new StringBuilder();
-              for (int netIx = 0; netIx < rippedItem.net_count(); netIx++) {
-                if (netIx > 0) {
-                  rippedNets.append('|');
-                }
-                rippedNets.append(rippedItem.get_net_no(netIx));
-              }
-              int ripupCost = ripped_item_costs.getOrDefault(rippedItem, -1);
-              FRLogger.trace(
-                  "BatchAutorouter.autoroute_pass",
-                  "compare_trace_ripped_item",
-                  "source_item=" + curr_item.get_id_no()
-                      + ", source_net=" + curr_item.get_net_no(i)
-                      + ", ripped_id=" + rippedItem.get_id_no()
-                      + ", ripped_type=" + rippedItem.getClass().getSimpleName()
-                      + ", ripped_net_count=" + rippedItem.net_count()
-                      + ", ripped_nets=" + rippedNets
-                      + ", ripup_cost=" + ripupCost,
-                  "Net #" + curr_item.get_net_no(i) + ",Item #" + curr_item.get_id_no(),
-                  getImpactedPoints(rippedItem));
-            }
-          }
-          if (FRLogger.isTraceEnabled()) {
-            DesignRulesChecker innerDrc = new DesignRulesChecker(board, null);
-            innerDrc.calculateAllIncompletes();
-            int tempIncomp = innerDrc.getIncompleteCount();
-            int tempNetIncomp = innerDrc.getIncompleteCount(curr_item.get_net_no(i));
-            int netItemsAfter = board.get_connectable_items(curr_item.get_net_no(i)).size();
-            int maxItemId = board.communication.id_no_generator.max_generated_no();
-            FRLogger.trace(
-                "BatchAutorouter.autoroute_pass",
-                "compare_trace_route_item",
-                "Routing " + curr_item.getClass().getSimpleName() + " -> result=" + autorouterResult.state
-                    + ", details=" + autorouterResult.details
-                    + ", incompletes=" + tempIncomp + ", netIncomplete=" + tempNetIncomp
-                    + ", ripped=" + ripped_item_list.size() + ", netItems="
-                    + netItemsBefore + "->" + netItemsAfter
-                    + ", maxItemId=" + maxItemId,
-                "Net #" + curr_item.get_net_no(i) + ",Item #" + curr_item.get_id_no() + ",Type="
-                    + curr_item.getClass().getSimpleName(),
-                getImpactedPoints(curr_item));
-          }
-
-          if (curr_item.get_net_no(i) == 94) {
-            FRLogger.trace(
-                "BatchAutorouter.autoroute_pass",
-                "compare_trace_dump_net_items",
-                "Dump net 94 items",
-                "Net #94",
-                new Point[0]);
-            for (Item nItem : board.get_connectable_items(94)) {
-              if (nItem instanceof Trace) {
-                Trace t = (Trace) nItem;
-                FRLogger.trace(
-                    "BatchAutorouter.autoroute_pass",
-                    "compare_trace_dump_net_item",
-                    "Trace layer=" + t.get_layer() + " corners=" + t.first_corner() + " to " + t.last_corner(),
-                    "Net #94,Item #" + t.get_id_no() + ",Type=Trace",
-                    new Point[] { t.first_corner(), t.last_corner() });
-              } else if (nItem instanceof Via) {
-                Via v = (Via) nItem;
-                FRLogger.trace(
-                    "BatchAutorouter.autoroute_pass",
-                    "compare_trace_dump_net_item",
-                    "Via center=" + v.get_center(),
-                    "Net #94,Item #" + v.get_id_no() + ",Type=Via",
-                    new Point[] { v.get_center() });
-              } else if (nItem instanceof Pin) {
-                Pin p = (Pin) nItem;
-                FRLogger.trace(
-                    "BatchAutorouter.autoroute_pass",
-                    "compare_trace_dump_net_item",
-                    "Pin center=" + p.get_center() + " name=" + p.name() + " comp=" + p.component_name(),
-                    "Net #94,Item #" + p.get_id_no() + ",Type=Pin",
-                    new Point[] { p.get_center() });
-              } else {
-                FRLogger.trace(
-                    "BatchAutorouter.autoroute_pass",
-                    "compare_trace_dump_net_item",
-                    "Item " + nItem.getClass().getSimpleName(),
-                    "Net #94,Item #" + nItem.get_id_no() + ",Type=" + nItem.getClass().getSimpleName(),
-                    getImpactedPoints(nItem));
-              }
-            }
-          }
-
           if (autorouterResult.state == AutorouteAttemptState.ROUTED) {
             // The item was successfully routed
             ++routed;
@@ -718,27 +631,11 @@ public class BatchAutorouter extends NamedAlgorithm {
         }
       }
 
-      int incompletesBefore = calculateIncompleteCount(board);
-      FRLogger.trace(
-          "BatchAutorouter.autoroute_pass",
-          "compare_trace_remove_tails",
-          "Incompletes before remove_tails=" + incompletesBefore,
-          "Autorouter pass #" + p_pass_no,
-          new Point[0]);
-
       if (this.remove_unconnected_vias) {
         remove_tails(Item.StopConnectionOption.NONE);
       } else {
         remove_tails(Item.StopConnectionOption.FANOUT_VIA);
       }
-
-      int incompletesAfter = calculateIncompleteCount(board);
-      FRLogger.trace(
-          "BatchAutorouter.autoroute_pass",
-          "compare_trace_remove_tails",
-          "Incompletes after remove_tails=" + incompletesAfter,
-          "Autorouter pass #" + p_pass_no,
-          new Point[0]);
 
       // Fire final update for this pass
       BoardStatistics boardStatistics = board.get_statistics();
@@ -1073,31 +970,6 @@ public class BatchAutorouter extends NamedAlgorithm {
         job.logInfo(passCompletedMessage);
       }
 
-      DesignRulesChecker tempDrc = new DesignRulesChecker(this.board, null);
-      tempDrc.calculateAllIncompletes();
-      StringBuilder perNetBreakdown = new StringBuilder();
-      for (int netNo = 1; netNo <= this.board.rules.nets.max_net_no(); netNo++) {
-        int netIncomplete = tempDrc.getIncompleteCount(netNo);
-        if (netIncomplete > 0) {
-          FRLogger.trace(
-              "BatchAutorouter.autoroute_pass",
-              "compare_unrouted_net",
-              "pass=" + currentPass + ", net=" + netNo + ", incomplete=" + netIncomplete,
-              "Net #" + netNo,
-              new Point[0]);
-          if (!perNetBreakdown.isEmpty()) {
-            perNetBreakdown.append(',');
-          }
-          perNetBreakdown.append(netNo).append('=').append(netIncomplete);
-        }
-      }
-      FRLogger.trace("BatchAutorouter.autoroute_pass", "compare_unrouted_breakdown",
-          "pass=" + currentPass
-              + ", total=" + tempDrc.getIncompleteCount()
-              + ", breakdown=" + perNetBreakdown,
-          "",
-          new Point[0]);
-
       if (this.settings.save_intermediate_stages) {
         fireBoardSnapshotEvent(this.board);
       }
@@ -1314,6 +1186,154 @@ public class BatchAutorouter extends NamedAlgorithm {
 
   // Tries to route an item on a specific net. Returns true, if the item is
   // routed.
+  boolean routeExactConnection(
+      Pin fromPin,
+      Pin toPin) {
+    return routeExactConnection(fromPin, toPin, false, 0, Double.NaN);
+  }
+
+  boolean routeExactConnection(
+      Pin fromPin,
+      Pin toPin,
+      boolean forceNoVias) {
+    return routeExactConnection(fromPin, toPin, forceNoVias, 0, Double.NaN);
+  }
+
+  boolean routeExactConnection(
+      Pin fromPin,
+      Pin toPin,
+      int pairLocateGuideSide,
+      double pairLocateGapMm) {
+    return routeExactConnection(fromPin, toPin, true, pairLocateGuideSide, pairLocateGapMm);
+  }
+
+  private boolean routeExactConnection(
+      Pin fromPin,
+      Pin toPin,
+      boolean forceNoVias,
+      int pairLocateGuideSide,
+      double pairLocateGapMm) {
+    if (fromPin == null || toPin == null || fromPin == toPin || fromPin.board != this.board || toPin.board != this.board) {
+      return false;
+    }
+
+    int routeNetNo = -1;
+    for (int i = 0; i < fromPin.net_count(); i++) {
+      int candidateNetNo = fromPin.get_net_no(i);
+      if (toPin.contains_net(candidateNetNo)) {
+        routeNetNo = candidateNetNo;
+        break;
+      }
+    }
+    if (routeNetNo <= 0) {
+      return false;
+    }
+    Set<Item> startSet = fromPin.get_connected_set(routeNetNo);
+    if (startSet.contains(toPin)) {
+      return true;
+    }
+    Set<Item> destinationSet = toPin.get_connected_set(routeNetNo);
+    Net routeNet = board.rules.nets.get(routeNetNo);
+    int viaCosts = routeNet != null && routeNet.contains_plane()
+        ? this.settings.get_plane_via_costs()
+        : this.settings.get_via_costs();
+    AutorouteControl control = new AutorouteControl(
+        this.board,
+        routeNetNo,
+        settings,
+        viaCosts,
+        traceCostsForRouterIntent(routeNetNo));
+    String routeNetName = routeNet == null ? null : routeNet.name;
+    applyRouterIntentPairCorridors(control, settings.intent, routeNetName);
+    applyRouterIntentPairViaTransitionCosts(control, settings.intent, routeNetName);
+    applyRouterIntentPairSkewLimit(control, settings.intent, routeNetName);
+    if (forceNoVias) {
+      control.vias_allowed = false;
+    }
+    if (pairLocateGuideSide != 0) {
+      if ((pairLocateGuideSide != -1 && pairLocateGuideSide != 1)
+          || !Double.isFinite(pairLocateGapMm)
+          || pairLocateGapMm < 0.0
+          || fromPin.first_layer() != fromPin.last_layer()
+          || toPin.first_layer() != toPin.last_layer()
+          || fromPin.first_layer() != toPin.first_layer()) {
+        return false;
+      }
+      double locateResolution = this.board.communication.get_resolution(Unit.MM);
+      Double targetWidthMm = settings.intent == null
+          ? null
+          : settings.intent.differentialPairTargetWidthMmForNet(routeNetName);
+      double leaderHalfWidth = targetWidthMm != null
+          && Double.isFinite(targetWidthMm)
+          && targetWidthMm > 0.0
+              ? targetWidthMm * locateResolution / 2.0
+              : control.trace_half_width[fromPin.first_layer()];
+      double locateSpacing = pairLocateGapMm * locateResolution
+          + leaderHalfWidth
+          + control.trace_half_width[fromPin.first_layer()];
+      control.setRouterIntentPairLocateGuide(
+          routedDifferentialPairSiblingOrderedPath(
+              settings.intent,
+              routeNetName,
+              fromPin,
+              toPin,
+              fromPin.first_layer()),
+          fromPin.first_layer(),
+          pairLocateGuideSide,
+          locateSpacing);
+      if (!control.hasRouterIntentPairLocateGuide()) {
+        return false;
+      }
+    }
+    control.ripup_allowed = true;
+    control.ripup_costs = this.start_ripup_costs * 2;
+    control.remove_unconnected_vias = true;
+
+    SortedSet<Item> rippedItems = new TreeSet<>();
+    Map<Item, Integer> rippedItemCosts = new LinkedHashMap<>();
+    try {
+      TimeLimit timeLimit = new TimeLimit(15_000);
+      AutorouteEngine engine = board.init_autoroute(
+          routeNetNo,
+          control.trace_clearance_class_no,
+          this.thread,
+          timeLimit,
+          false);
+      AutorouteAttemptResult result = engine.autoroute_connection(
+          startSet,
+          destinationSet,
+          control,
+          rippedItems,
+          rippedItemCosts);
+      boolean connected = fromPin.get_connected_set(routeNetNo).contains(toPin);
+      if ((result.state != AutorouteAttemptState.ROUTED || !connected) && job != null) {
+        job.logDebug("Router-intent exact connection result for net '" + routeNetName
+            + "': state=" + result.state + ", connected=" + connected
+            + ", details=" + result.details + ".");
+      }
+      return result.state == AutorouteAttemptState.ROUTED && connected;
+    } catch (RuntimeException exception) {
+      if (job != null) {
+        job.logDebug("Router-intent exact connection routing failed for net '" + routeNetName + "': "
+            + exception.getMessage());
+      }
+      return false;
+    } finally {
+      board.finish_autoroute();
+    }
+  }
+
+  boolean routeRemainingConnections(int maxPasses) {
+    int boundedPasses = Math.max(0, Math.min(maxPasses, 2));
+    for (int pass = 1; pass <= boundedPasses; pass++) {
+      if (calculateIncompleteCount(this.board) == 0) {
+        return true;
+      }
+      autoroute_pass(pass);
+    }
+    return calculateIncompleteCount(this.board) == 0;
+  }
+
   private AutorouteAttemptResult autoroute_item(Item p_item, int p_route_net_no, SortedSet<Item> p_ripped_item_list,
       Map<Item, Integer> p_ripup_costs, int p_ripup_pass_no) {
     try {
@@ -1395,12 +1415,8 @@ public class BatchAutorouter extends NamedAlgorithm {
 
       // Update the changed area of the board
       if (autoroute_result.state == AutorouteAttemptState.ROUTED) {
-        int maxItemIdBeforeOpt = board.communication.id_no_generator.max_generated_no();
-        FRLogger.trace("compare_trace_opt_changed_area_before net=" + p_route_net_no + ", maxItemId=" + maxItemIdBeforeOpt);
         board.opt_changed_area(new int[0], null, this.trace_pull_tight_accuracy, autoroute_control.trace_costs,
             this.thread, TIME_LIMIT_TO_PREVENT_ENDLESS_LOOP);
-        int maxItemIdAfterOpt = board.communication.id_no_generator.max_generated_no();
-        FRLogger.trace("compare_trace_opt_changed_area_after net=" + p_route_net_no + ", maxItemId=" + maxItemIdAfterOpt + ", delta=" + (maxItemIdAfterOpt - maxItemIdBeforeOpt));
       }
 
       return autoroute_result;
@@ -1813,6 +1829,100 @@ public class BatchAutorouter extends NamedAlgorithm {
     return result.toArray(new AutorouteControl.PairCenterlineGuide[0]);
   }
 
+  private FloatPoint[] routedDifferentialPairSiblingOrderedPath(
+      RouterIntentSettings intent,
+      String routeNetName,
+      Pin followerFrom,
+      Pin followerTo,
+      int layer) {
+    if (intent == null
+        || routeNetName == null
+        || followerFrom == null
+        || followerTo == null
+        || layer < 0) {
+      return new FloatPoint[0];
+    }
+
+    Map<GridPoint, Set<GridPoint>> adjacency = new LinkedHashMap<>();
+    for (Trace trace : routedDifferentialPairSiblingTraces(intent, routeNetName)) {
+      if (!(trace instanceof PolylineTrace polylineTrace) || trace.get_layer() != layer) {
+        continue;
+      }
+      FloatPoint[] corners = polylineTrace.polyline().corner_approx_arr();
+      for (int i = 1; i < corners.length; i++) {
+        GridPoint start = GridPoint.from(corners[i - 1]);
+        GridPoint end = GridPoint.from(corners[i]);
+        if (start.equals(end)) {
+          continue;
+        }
+        adjacency.computeIfAbsent(start, ignored -> new LinkedHashSet<>()).add(end);
+        adjacency.computeIfAbsent(end, ignored -> new LinkedHashSet<>()).add(start);
+      }
+    }
+    if (adjacency.size() < 2) {
+      return new FloatPoint[0];
+    }
+
+    List<GridPoint> endpoints = adjacency.entrySet().stream()
+        .filter(entry -> entry.getValue().size() == 1)
+        .map(Map.Entry::getKey)
+        .sorted(GridPoint.ORDER)
+        .toList();
+    List<GridPoint> candidates = endpoints.size() >= 2
+        ? endpoints
+        : adjacency.keySet().stream().sorted(GridPoint.ORDER).toList();
+    FloatPoint fromCenter = followerFrom.get_center().to_float();
+    FloatPoint toCenter = followerTo.get_center().to_float();
+    GridPoint start = candidates.stream()
+        .min(Comparator
+            .comparingDouble((GridPoint point) -> point.toFloat().distance_square(fromCenter))
+            .thenComparing(GridPoint.ORDER))
+        .orElse(null);
+    GridPoint target = candidates.stream()
+        .filter(point -> !point.equals(start))
+        .min(Comparator
+            .comparingDouble((GridPoint point) -> point.toFloat().distance_square(toCenter))
+            .thenComparing(GridPoint.ORDER))
+        .orElse(null);
+    if (start == null || target == null) {
+      return new FloatPoint[0];
+    }
+
+    ArrayDeque<GridPoint> queue = new ArrayDeque<>();
+    Map<GridPoint, GridPoint> parent = new LinkedHashMap<>();
+    Set<GridPoint> visited = new LinkedHashSet<>();
+    queue.add(start);
+    visited.add(start);
+    while (!queue.isEmpty() && !visited.contains(target)) {
+      GridPoint current = queue.removeFirst();
+      List<GridPoint> neighbours = adjacency.getOrDefault(current, Set.of()).stream()
+          .sorted(GridPoint.ORDER)
+          .toList();
+      for (GridPoint neighbour : neighbours) {
+        if (visited.add(neighbour)) {
+          parent.put(neighbour, current);
+          queue.addLast(neighbour);
+        }
+      }
+    }
+    if (!visited.contains(target)) {
+      return new FloatPoint[0];
+    }
+
+    List<GridPoint> reversed = new ArrayList<>();
+    for (GridPoint point = target; point != null; point = parent.get(point)) {
+      reversed.add(point);
+      if (point.equals(start)) {
+        break;
+      }
+    }
+    FloatPoint[] result = new FloatPoint[reversed.size()];
+    for (int i = 0; i < reversed.size(); i++) {
+      result[i] = reversed.get(reversed.size() - 1 - i).toFloat();
+    }
+    return result;
+  }
+
   void applyRouterIntentPairCorridors(
       AutorouteControl control,
       RouterIntentSettings intent,
@@ -1876,6 +1986,20 @@ public class BatchAutorouter extends NamedAlgorithm {
   }
 
   private record DifferentialPairSpacingBand(double targetCenterSpacing, double tolerance) {
+  }
+
+  private record GridPoint(int x, int y) {
+    private static final Comparator<GridPoint> ORDER = Comparator
+        .comparingInt(GridPoint::x)
+        .thenComparingInt(GridPoint::y);
+
+    static GridPoint from(FloatPoint point) {
+      return new GridPoint((int) Math.round(point.x), (int) Math.round(point.y));
+    }
+
+    FloatPoint toFloat() {
+      return new FloatPoint(x, y);
+    }
   }
 
   void applyRouterIntentPairViaTransitionCosts(

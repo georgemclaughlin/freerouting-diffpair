@@ -1,0 +1,39 @@
+(pcb router-intent-pair-gap-band-metrics
+  (parser (string_quote "))
+  (resolution um 10)
+  (unit um)
+  (structure
+    (layer F.Cu (type signal) (property (index 0)))
+    (boundary (path pcb 0  0 0  100000 0  100000 -60000  0 -60000  0 0))
+    (rule (width 200) (clearance 150) (clearance 100 (type smd_smd)))
+  )
+  (library
+    (padstack Rect[T]Pad_200x200_um
+      (shape (rect F.Cu -100 -100 100 100))
+      (attach off)
+    )
+    (image Pad_200um
+      (pin Rect[T]Pad_200x200_um 1 0 0)
+    )
+  )
+  (placement
+    (component Pad_200um
+      (place P1 10000 -20000 front 0)
+      (place P2 90000 -20000 front 0)
+      (place N1 10000 -20380 front 0)
+      (place N2 90000 -20380 front 0)
+    )
+  )
+  (network
+    (net USB_D+ (pins P1-1 P2-1))
+    (net USB_D- (pins N1-1 N2-1))
+    (class default "" USB_D+ USB_D-
+      (rule (width 200) (clearance 150))
+      (circuit (use_layer F.Cu))
+    )
+  )
+  (wiring
+    (wire (path F.Cu 200  10000 -20000  90000 -20000) (net USB_D+) (type route))
+    (wire (path F.Cu 200  10000 -20380  20000 -20380  21000 -20600  79000 -20600  80000 -20380  90000 -20380) (net USB_D-) (type route))
+  )
+)

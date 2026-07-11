@@ -104,6 +104,29 @@ class RouterIntentSettingsTest {
   }
 
   @Test
+  void allowedLayersRemainHardWithoutSameLayerRequirement() {
+    RouterIntentSettings intent = new RouterIntentSettings();
+    RouterIntentSettings.DifferentialPairIntent pair = new RouterIntentSettings.DifferentialPairIntent();
+    pair.positiveNet = "USB_D_PLUS";
+    pair.negativeNet = "USB_D_MINUS";
+    pair.allowedLayers = new String[] { "F.Cu" };
+    pair.sameLayerRequired = false;
+    intent.differentialPairs = new RouterIntentSettings.DifferentialPairIntent[] { pair };
+
+    assertTrue(intent.isHardDifferentialPairLayerForNet("USB_D_PLUS", "F.Cu"));
+    assertFalse(intent.isHardDifferentialPairLayerForNet("USB_D_MINUS", "B.Cu"));
+  }
+
+  @Test
+  void loadedIntentCarriesExactPayloadSha256() throws IOException {
+    Path payload = writePayload("router-intent.json", validPayload());
+
+    RouterIntentSettings intent = RouterIntentSettings.load(payload);
+
+    assertEquals(RouterApplicationReceipt.sha256(Files.readAllBytes(payload)), intent.intentSha256());
+  }
+
+  @Test
   void loadsDifferentialPairMaxUncoupledLength() throws IOException {
     RouterIntentSettings intent = RouterIntentSettings.load(writePayload(
         "router-intent.json",
@@ -193,6 +216,96 @@ class RouterIntentSettingsTest {
   }
 
   @Test
+  void rejectsMissingRequiredFieldsAndWrongPrimitiveTypes() throws IOException {
+    Path missingField = writePayload("missing-profile.json", validPayload().replace(
+        "  \"profile\": \"esp32_air_quality_node\",\n",
+        ""));
+    Path wrongIntegerType = writePayload("wrong-seed-type.json", validPayload().replace(
+        "\"deterministic_seed\": 123",
+        "\"deterministic_seed\": \"123\""));
+    Path wrongBooleanType = writePayload("wrong-boolean-type.json", validPayload().replace(
+        "\"single_thread_default\": true",
+        "\"single_thread_default\": 1"));
+
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(missingField));
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(wrongIntegerType));
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(wrongBooleanType));
+  }
+
+  @Test
+  void rejectsNonFiniteOutOfRangeAndDuplicateValues() throws IOException {
+    Path nonFinite = writePayload("non-finite-width.json", validPayload().replace(
+        "\"track_width_mm\": 0.25",
+        "\"track_width_mm\": NaN"));
+    Path outOfRange = writePayload("negative-skew.json", validPayload().replace(
+        "\"max_skew_mm\": 2.0",
+        "\"max_skew_mm\": -0.1"));
+    Path duplicateNet = writePayload("duplicate-net.json", validPayload().replace(
+        "\"net\": \"ESP_BOOT_LOCAL\"",
+        "\"net\": \"3V3\""));
+    Path duplicateLayer = writePayload("duplicate-layer.json", validPayload().replace(
+        "\"preferred_layers\": [\"F.Cu\", \"In1.Cu\"]",
+        "\"preferred_layers\": [\"F.Cu\", \"F.Cu\"]"));
+
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(nonFinite));
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(outOfRange));
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(duplicateNet));
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(duplicateLayer));
+  }
+
+  @Test
+  void rejectsIncompleteDifferentialPairAndBlockPortShapes() throws IOException {
+    Path partialEndpoints = writePayload("partial-pair-endpoints.json", validPayload().replace(
+        "\"differential_pairs\": []",
+        """
+        "differential_pairs": [{
+          "id": "pair",
+          "positive_net": "P",
+          "negative_net": "N",
+          "priority": "critical",
+          "positive_from": "J1.1",
+          "positive_to": null,
+          "negative_from": null,
+          "negative_to": null,
+          "positive_preferred_layers": [],
+          "negative_preferred_layers": [],
+          "allowed_layers": [],
+          "same_layer_required": false,
+          "max_vias_per_net": null,
+          "matched_via_transitions_required": false,
+          "route_as_coupled_pair": false,
+          "target_width_mm": null,
+          "target_gap_mm": null,
+          "gap_tolerance_mm": null,
+          "endpoint_escape_width_mm": null,
+          "endpoint_escape_length_mm": null,
+          "max_skew_mm": null,
+          "max_stub_mm": null,
+          "min_parallel_length_ratio": null,
+          "max_uncoupled_length_mm": null,
+          "require_parallel_evidence": false
+        }]"""));
+    Path ambiguousPoint = writePayload(
+        "ambiguous-block-point.json",
+        validPayload()
+            .replace("\"x_mm\": null", "\"x_mm\": 1.0")
+            .replace("\"y_mm\": null", "\"y_mm\": 2.0"));
+
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(partialEndpoints));
+    assertThrows(IllegalArgumentException.class, () -> RouterIntentSettings.load(ambiguousPoint));
+  }
+
+  @Test
+  void applicationReceiptRevalidatesMutableIntent() throws IOException {
+    RouterIntentSettings intent = RouterIntentSettings.load(writePayload("router-intent.json", validPayload()));
+    intent.netIntents[0].routeOrderRank = -1;
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> RouterApplicationReceipt.create(intent, "a".repeat(64)));
+  }
+
+  @Test
   void cliRouterIntentFilePopulatesRouterSettingsIntent() throws IOException {
     Path payload = writePayload("router-intent.json", validPayload());
 
@@ -215,6 +328,7 @@ class RouterIntentSettingsTest {
     assertNotNull(target.intent);
     assertEquals(3, target.intent.priorityRankForNet("3V3"));
     assertEquals(2, target.intent.scopeRankForNet("ESP_BOOT_LOCAL"));
+    assertEquals(source.intent.intentSha256(), target.intent.intentSha256());
   }
 
   private Path writePayload(String filename, String payload) throws IOException {

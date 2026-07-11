@@ -158,22 +158,23 @@ public class AutorouteEngine {
       }
     }
 
-    if (search_result != null) {
-      if (p_ctrl.net_no == 33 || p_ctrl.net_no == 66 || p_ctrl.net_no == 67) {
-        String destinationType = search_result.destination_door != null
-            ? search_result.destination_door.getClass().getSimpleName()
-            : "null";
-        FRLogger.trace("compare_trace_maze_result_raw net=" + p_ctrl.net_no
-            + ", section=" + search_result.section_no_of_door
-            + ", destination_type=" + destinationType);
-      }
-    }
-
     LocateFoundConnectionAlgo autoroute_result = null;
     if (search_result != null) {
       try {
         autoroute_result = LocateFoundConnectionAlgo.get_instance(search_result, p_ctrl, this.autoroute_search_tree,
             board.rules.get_trace_angle_restriction(), p_ripped_item_list, p_ripup_costs);
+        if (autoroute_result != null && p_ctrl.hasRouterIntentPairLocateGuide()) {
+          if (!autoroute_result.applyRouterIntentPairLocateGuide()) {
+            FRLogger.debug("AutorouteEngine.autoroute_connection: pair-aware locate guide could not be constructed");
+            autoroute_result = null;
+          } else {
+            // The guided path replaces the maze path, so its speculative ripup set is not authoritative.
+            p_ripped_item_list.clear();
+            if (p_ripup_costs != null) {
+              p_ripup_costs.clear();
+            }
+          }
+        }
       } catch (Exception e) {
         FRLogger.error("AutorouteEngine.autoroute_connection: Exception in LocateFoundConnectionAlgo.get_instance", e);
       }

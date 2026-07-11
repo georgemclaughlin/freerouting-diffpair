@@ -46,17 +46,6 @@ public class InsertFoundConnectionAlgo {
     int curr_layer = p_connection.target_layer;
     InsertFoundConnectionAlgo new_instance = new InsertFoundConnectionAlgo(p_board, p_ctrl);
     for (LocateFoundConnectionAlgoAnyAngle.ResultItem curr_new_item : p_connection.connection_items) {
-      if (true) {
-        Point startCorner = curr_new_item.corners.length > 0 ? curr_new_item.corners[0] : null;
-        Point endCorner = curr_new_item.corners.length > 0
-            ? curr_new_item.corners[curr_new_item.corners.length - 1]
-            : null;
-        FRLogger.trace("compare_trace_connection_item_raw net=" + p_ctrl.net_no
-            + ", item_layer=" + curr_new_item.layer
-            + ", corner_count=" + curr_new_item.corners.length
-            + ", start=" + formatPoint(startCorner)
-            + ", end=" + formatPoint(endCorner));
-      }
       if (!new_instance.insert_via(curr_new_item.corners[0], curr_layer, curr_new_item.layer)) {
         FRLogger.debug("InsertFoundConnectionAlgo: insert via failed for net #" + p_ctrl.net_no);
         return null;
@@ -135,18 +124,14 @@ public class InsertFoundConnectionAlgo {
     }
     int[] net_no_arr = new int[1];
     net_no_arr[0] = ctrl.net_no;
+    int tidyWidth = ctrl.hasRouterIntentPairLocateGuide() ? 0 : Integer.MAX_VALUE;
 
     int from_corner_no = 0;
     for (int i = 1; i < p_trace.corners.length; i++) {
       Point[] curr_corner_arr = Arrays.copyOfRange(p_trace.corners, from_corner_no, i + 1);
       Polyline insert_polyline = new Polyline(curr_corner_arr);
-      int maxItemIdBeforeSeg = board.communication.id_no_generator.max_generated_no();
       Point ok_point = board.insert_forced_trace_polyline(insert_polyline, ctrl.trace_half_width[p_trace.layer], p_trace.layer, net_no_arr, ctrl.trace_clearance_class_no,
-          ctrl.max_shove_trace_recursion_depth, ctrl.max_shove_via_recursion_depth, ctrl.max_spring_over_recursion_depth, Integer.MAX_VALUE, ctrl.pull_tight_accuracy, true, null);
-      int maxItemIdAfterSeg = board.communication.id_no_generator.max_generated_no();
-      FRLogger.trace("compare_trace_insert_segment_ids net=" + ctrl.net_no + ", i=" + i
-          + ", maxItemIdBefore=" + maxItemIdBeforeSeg + ", maxItemIdAfter=" + maxItemIdAfterSeg
-          + ", delta=" + (maxItemIdAfterSeg - maxItemIdBeforeSeg));
+          ctrl.max_shove_trace_recursion_depth, ctrl.max_shove_via_recursion_depth, ctrl.max_spring_over_recursion_depth, tidyWidth, ctrl.pull_tight_accuracy, true, null);
       boolean neckdown_inserted = false;
       boolean micro_neckdown_inserted = false;
       if (ok_point != null && ok_point != insert_polyline.last_corner() && ctrl.with_neckdown && curr_corner_arr.length == 2) {
@@ -158,26 +143,6 @@ public class InsertFoundConnectionAlgo {
       }
       if (ok_point == insert_polyline.last_corner() || neckdown_inserted || micro_neckdown_inserted) {
         from_corner_no = i;
-        if (true) {
-          FRLogger.trace(
-              "compare_trace_insert_segment_raw net=" + ctrl.net_no + ", layer=" + p_trace.layer
-                  + ", i=" + i + ", from_corner_no=" + from_corner_no
-                  + ", decision=ADVANCE, neckdown=" + neckdown_inserted
-                  + ", micro_neckdown=" + micro_neckdown_inserted
-                  + ", ok_point=" + formatPoint(ok_point)
-                  + ", first=" + formatPoint(insert_polyline.first_corner())
-                  + ", last=" + formatPoint(insert_polyline.last_corner()));
-          FRLogger.trace(
-              "InsertFoundConnectionAlgo.insert_trace",
-              "compare_trace_insert_segment",
-              "net=" + ctrl.net_no + ", layer=" + p_trace.layer + ", i=" + i + ", from_corner_no="
-                  + from_corner_no + ", decision=ADVANCE, neckdown=" + neckdown_inserted
-                  + ", micro_neckdown=" + micro_neckdown_inserted
-                  + ", ok_point=" + ok_point + ", first=" + insert_polyline.first_corner()
-                  + ", last=" + insert_polyline.last_corner(),
-              "Net #" + ctrl.net_no,
-              new Point[0]);
-        }
       } else if (ok_point == insert_polyline.first_corner() && i != p_trace.corners.length - 1) {
         // if ok_point == insert_polyline.first_corner() the spring over may have failed.
         // Spring over may correct the situation because an insertion, which is ok with clearance
@@ -194,24 +159,6 @@ public class InsertFoundConnectionAlgo {
           }
         }
         FRLogger.trace("InsertFoundConnectionAlgo: violation corrected");
-        if (true) {
-          FRLogger.trace(
-              "compare_trace_insert_segment_raw net=" + ctrl.net_no + ", layer=" + p_trace.layer
-                  + ", i=" + i + ", from_corner_no=" + from_corner_no
-                  + ", decision=VIOLATION_CORRECTED, neckdown=" + neckdown_inserted
-                  + ", ok_point=" + formatPoint(ok_point)
-                  + ", first=" + formatPoint(insert_polyline.first_corner())
-                  + ", last=" + formatPoint(insert_polyline.last_corner()));
-          FRLogger.trace(
-              "InsertFoundConnectionAlgo.insert_trace",
-              "compare_trace_insert_segment",
-              "net=" + ctrl.net_no + ", layer=" + p_trace.layer + ", i=" + i + ", from_corner_no="
-                  + from_corner_no + ", decision=VIOLATION_CORRECTED, neckdown=" + neckdown_inserted
-                  + ", ok_point=" + ok_point + ", first=" + insert_polyline.first_corner()
-                  + ", last=" + insert_polyline.last_corner(),
-              "Net #" + ctrl.net_no,
-              new Point[0]);
-        }
       } else {
         FRLogger.debug("InsertFoundConnectionAlgo: insert trace failed for net #" + ctrl.net_no
             + " at corner " + i + "/" + (p_trace.corners.length - 1)
@@ -230,55 +177,17 @@ public class InsertFoundConnectionAlgo {
                 + ", end_pin_clearance_class=" + (end_pin != null ? end_pin.clearance_class_no() : -1)
                 + ", ok_point=" + formatPoint(ok_point)
                 + ", target=" + formatPoint(insert_polyline.last_corner()));
-        if (true) {
-          FRLogger.trace(
-              "compare_trace_insert_segment_raw net=" + ctrl.net_no + ", layer=" + p_trace.layer
-                  + ", i=" + i + ", from_corner_no=" + from_corner_no
-                  + ", decision=FAIL, neckdown=" + neckdown_inserted
-                  + ", micro_neckdown=" + micro_neckdown_inserted
-                  + ", ok_point=" + formatPoint(ok_point)
-                  + ", first=" + formatPoint(insert_polyline.first_corner())
-                  + ", last=" + formatPoint(insert_polyline.last_corner()));
-          FRLogger.trace(
-              "InsertFoundConnectionAlgo.insert_trace",
-              "compare_trace_insert_segment",
-              "net=" + ctrl.net_no + ", layer=" + p_trace.layer + ", i=" + i + ", from_corner_no="
-                  + from_corner_no + ", decision=FAIL, neckdown=" + neckdown_inserted
-                  + ", micro_neckdown=" + micro_neckdown_inserted
-                  + ", ok_point=" + ok_point + ", first=" + insert_polyline.first_corner()
-                  + ", last=" + insert_polyline.last_corner(),
-              "Net #" + ctrl.net_no,
-              new Point[0]);
-        }
         result = false;
         break;
       }
     }
 
-    int removedTraceStubs = 0;
     for (int i = 0; i < p_trace.corners.length - 1; i++) {
       Trace trace_stub = board.get_trace_tail(p_trace.corners[i], p_trace.layer, net_no_arr);
       if (trace_stub != null) {
-        FRLogger.trace("compare_trace_stub_found net=" + ctrl.net_no
-            + ", corner_idx=" + i
-            + ", corner=" + p_trace.corners[i]
-            + ", stub_id=" + trace_stub.get_id_no()
-            + ", stub_first=" + trace_stub.first_corner()
-            + ", stub_last=" + trace_stub.last_corner()
-            + ", start_contacts=" + trace_stub.get_start_contacts().size()
-            + ", end_contacts=" + trace_stub.get_end_contacts().size());
         board.remove_item(trace_stub);
-        removedTraceStubs++;
       }
     }
-
-    FRLogger.trace(
-        "InsertFoundConnectionAlgo.insert_trace",
-        "compare_trace_stub_cleanup",
-        "net=" + ctrl.net_no + ", layer=" + p_trace.layer + ", removed_stubs=" + removedTraceStubs
-            + ", trace_enabled=" + FRLogger.isTraceEnabled(),
-        "Net #" + ctrl.net_no,
-        new Point[0]);
 
     board.rules.set_pin_edge_to_turn_dist(saved_edge_to_turn_dist);
     if (this.first_corner == null) {

@@ -4,6 +4,7 @@ import app.freerouting.Freerouting;
 import app.freerouting.autoroute.BatchAutorouter;
 import app.freerouting.autoroute.BatchOptimizer;
 import app.freerouting.autoroute.NamedAlgorithm;
+import app.freerouting.autoroute.RouterIntentObjectiveRefiner;
 import app.freerouting.autoroute.events.BoardUpdatedEvent;
 import app.freerouting.autoroute.events.BoardUpdatedEventListener;
 import app.freerouting.core.BoardFileDetails;
@@ -107,6 +108,8 @@ public class RoutingJobSchedulerActionThread extends StoppableThread {
       // Always use standard BatchAutorouter
       router = new BatchAutorouter(job);
       BatchAutorouter batchRouter = (BatchAutorouter) router;
+      RouterIntentObjectiveRefiner.RetainedCopper retainedCopper =
+          RouterIntentObjectiveRefiner.captureRetainedCopper(job.board);
 
       router.addBoardUpdatedEventListener(new BoardUpdatedEventListener() {
         @Override
@@ -117,6 +120,15 @@ public class RoutingJobSchedulerActionThread extends StoppableThread {
 
       // Call runBatchLoop
       batchRouter.runBatchLoop();
+
+      RouterIntentObjectiveRefiner.Result refinement = RouterIntentObjectiveRefiner.refine(job, retainedCopper);
+      if (refinement.accepted()) {
+        job.board = refinement.board();
+        job.logInfo("Accepted " + refinement.acceptedCandidateCount()
+            + " bounded router-intent objective refinement candidate"
+            + (refinement.acceptedCandidateCount() == 1 ? "." : "s."));
+        setJobOutput(job);
+      }
 
       // Log session summary
       Instant sessionStartTime = batchRouter.getSessionStartTime();

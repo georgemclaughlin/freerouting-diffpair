@@ -684,6 +684,11 @@ public class RouterSettings implements Serializable, Cloneable {
     }
 
     int changedCount = ReflectionUtil.copyFields(settings, this);
+    if (settings.intent != null) {
+      // Reflection merging intentionally ignores private/transient fields. Keep the
+      // loaded payload digest with the intent so the CLI receipt binds the exact bytes.
+      this.intent = settings.intent.clone();
+    }
 
 
     // Fire property change events for key properties to update GUI

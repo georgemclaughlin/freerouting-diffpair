@@ -61,16 +61,11 @@ public class RoutingJobScheduler {
             // start the jobs up to the maximum number of parallel jobs (and make a copy of
             // the list to avoid concurrent modification)
             for (RoutingJob job : jobsArray) {
-              if (job.state == RoutingJobState.READY_TO_START) {
-                int parallelJobs = (int) jobs
-                    .stream()
-                    .filter(j -> j.state == RoutingJobState.RUNNING)
-                    .count();
-
-                if (parallelJobs < maxParallelJobs) {
+              if (claimReadyJobForStart(job)) {
+                  startedAny = true;
                   if ((job.input == null) || (job.input.getData() == null)) {
                     FRLogger.warn("RoutingJob input is null, it is skipped.");
-                    job.state = RoutingJobState.INVALID;
+                    finishClaimedJob(job, RoutingJobState.INVALID);
                     continue;
                   }
 
@@ -128,22 +123,26 @@ public class RoutingJobScheduler {
 
                       // All pre-checks look fine, start the routing process on a new thread
                       StoppableThread routerThread = new RoutingJobSchedulerActionThread(job);
-                      job.thread = routerThread;
-                      job.state = RoutingJobState.RUNNING;
-                      job.thread.start();
-                      startedAny = true;
+                      synchronized (jobs) {
+                        if (job.state == RoutingJobState.STOPPING) {
+                          job.state = RoutingJobState.CANCELLED;
+                          continue;
+                        }
+                        if (job.state != RoutingJobState.RUNNING) {
+                          continue;
+                        }
+                        job.thread = routerThread;
+                        job.thread.start();
+                      }
                     } catch (Exception e) {
                       FRLogger.error("Failed to set up routing job '" + job.id + "', it will be terminated.", e);
-                      job.state = RoutingJobState.TERMINATED;
+                      finishClaimedJob(job, RoutingJobState.TERMINATED);
                     }
                   } else {
                     FRLogger.warn("Only DSN and JSON formats are supported as an input.");
-                    job.state = RoutingJobState.INVALID;
+                    finishClaimedJob(job, RoutingJobState.INVALID);
                     continue;
                   }
-                } else {
-                  break;
-                }
               }
             }
 
@@ -176,6 +175,41 @@ public class RoutingJobScheduler {
     return instance;
   }
 
+  boolean claimReadyJobForStart(RoutingJob job) {
+    synchronized (jobs) {
+      if (job == null || job.state != RoutingJobState.READY_TO_START) {
+        return false;
+      }
+      long parallelJobs = jobs.stream().filter(j -> j.state == RoutingJobState.RUNNING).count();
+      if (parallelJobs >= maxParallelJobs) {
+        return false;
+      }
+      job.state = RoutingJobState.RUNNING;
+      return true;
+    }
+  }
+
+  /** Terminates a CLI job only if the scheduler has not claimed it for setup. */
+  public boolean terminateReadyJobIfUnclaimed(RoutingJob job) {
+    synchronized (jobs) {
+      if (job == null || job.state != RoutingJobState.READY_TO_START) {
+        return false;
+      }
+      job.state = RoutingJobState.TERMINATED;
+      return true;
+    }
+  }
+
+  private void finishClaimedJob(RoutingJob job, RoutingJobState failureState) {
+    synchronized (jobs) {
+      if (job.state == RoutingJobState.STOPPING) {
+        job.state = RoutingJobState.CANCELLED;
+      } else if (job.state == RoutingJobState.RUNNING) {
+        job.state = failureState;
+      }
+    }
+  }
+
   private String UUIDtoShortCode(UUID uuid) {
     return uuid
         .toString()
@@ -190,6 +224,14 @@ public class RoutingJobScheduler {
    * @return The job that was enqueued.
    */
   public RoutingJob enqueueJob(RoutingJob job) {
+    return enqueueJob(job, RoutingJobState.QUEUED);
+  }
+
+  public RoutingJob enqueueReadyJob(RoutingJob job) {
+    return enqueueJob(job, RoutingJobState.READY_TO_START);
+  }
+
+  private RoutingJob enqueueJob(RoutingJob job, RoutingJobState initialState) {
     // Get the session object from the SessionManager and user ID from the job
     UUID sessionId = job.sessionId;
     if (sessionId == null) {
@@ -208,9 +250,8 @@ public class RoutingJobScheduler {
       throw new IllegalArgumentException("The session must have a user ID.");
     }
 
-    job.state = RoutingJobState.QUEUED;
-
     synchronized (jobs) {
+      job.state = initialState;
       this.jobs.add(job);
     }
 

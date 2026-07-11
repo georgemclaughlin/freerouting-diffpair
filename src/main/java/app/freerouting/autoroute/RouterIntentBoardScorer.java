@@ -373,7 +373,7 @@ final class RouterIntentBoardScorer {
     return Math.max(0.0, centerlineDistance - firstTrace.get_half_width() - secondTrace.get_half_width());
   }
 
-  private static double segmentDistance(FloatPoint firstStart, FloatPoint firstEnd, FloatPoint secondStart, FloatPoint secondEnd) {
+  static double segmentDistance(FloatPoint firstStart, FloatPoint firstEnd, FloatPoint secondStart, FloatPoint secondEnd) {
     if (segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd)) {
       return 0.0;
     }

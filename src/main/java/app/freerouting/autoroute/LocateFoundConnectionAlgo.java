@@ -3,17 +3,21 @@ package app.freerouting.autoroute;
 import app.freerouting.board.AngleRestriction;
 import app.freerouting.board.Connectable;
 import app.freerouting.board.Item;
+import app.freerouting.board.Pin;
 import app.freerouting.board.ShapeSearchTree;
 import app.freerouting.boardgraphics.GraphicsContext;
 import app.freerouting.geometry.planar.FloatPoint;
+import app.freerouting.geometry.planar.FloatLine;
 import app.freerouting.geometry.planar.IntPoint;
 import app.freerouting.geometry.planar.TileShape;
 import app.freerouting.logger.FRLogger;
 import java.awt.Graphics;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.SortedSet;
 
@@ -61,26 +65,11 @@ public abstract class LocateFoundConnectionAlgo {
       SortedSet<Item> p_ripped_item_list, Map<Item, Integer> p_ripup_costs) {
     this.ctrl = p_ctrl;
     this.angle_restriction = p_angle_restriction;
-    Collection<BacktrackElement> backtrack_list = backtrack(p_maze_search_result, p_ripped_item_list, p_ripup_costs, p_ctrl.net_no);
+    Collection<BacktrackElement> backtrack_list = backtrack(p_maze_search_result, p_ripped_item_list, p_ripup_costs);
     this.backtrack_array = new BacktrackElement[backtrack_list.size()];
     Iterator<BacktrackElement> it = backtrack_list.iterator();
     for (int i = 0; i < backtrack_array.length; i++) {
       this.backtrack_array[i] = it.next();
-    }
-    if (this.ctrl.net_no == 33 || this.ctrl.net_no == 66 || this.ctrl.net_no == 67) {
-      FRLogger.trace("compare_trace_backtrack_raw net=" + this.ctrl.net_no
-          + ", size=" + this.backtrack_array.length);
-      for (int i = 0; i < this.backtrack_array.length; i++) {
-        BacktrackElement element = this.backtrack_array[i];
-        String nextRoomType = element.next_room != null
-            ? element.next_room.getClass().getSimpleName()
-            : "null";
-        FRLogger.trace("compare_trace_backtrack_raw net=" + this.ctrl.net_no
-            + ", idx=" + i
-            + ", door_type=" + element.door.getClass().getSimpleName()
-            + ", section=" + element.section_no_of_door
-            + ", next_room_type=" + nextRoomType);
-      }
     }
     this.connection_items = new LinkedList<>();
     BacktrackElement start_info = this.backtrack_array[backtrack_array.length - 1];
@@ -191,7 +180,10 @@ public abstract class LocateFoundConnectionAlgo {
   /**
    * Creates a list of doors by backtracking from p_destination_door to the start door. Returns null, if p_destination_door is null.
    */
-  private static Collection<BacktrackElement> backtrack(MazeSearchAlgo.Result p_maze_search_result, SortedSet<Item> p_ripped_item_list, Map<Item, Integer> p_ripup_costs, int p_net_no) {
+  private static Collection<BacktrackElement> backtrack(
+      MazeSearchAlgo.Result p_maze_search_result,
+      SortedSet<Item> p_ripped_item_list,
+      Map<Item, Integer> p_ripup_costs) {
     if (p_maze_search_result == null) {
       return null;
     }
@@ -199,14 +191,6 @@ public abstract class LocateFoundConnectionAlgo {
     CompleteExpansionRoom curr_next_room = null;
     ExpandableObject curr_backtrack_door = p_maze_search_result.destination_door;
     MazeSearchElement curr_maze_search_element = curr_backtrack_door.get_maze_search_element(p_maze_search_result.section_no_of_door);
-    boolean debugBacktrack = (p_net_no == 98);
-    if (debugBacktrack) {
-      String destType = curr_backtrack_door.getClass().getSimpleName();
-      FRLogger.trace("BACKTRACK_START net=" + p_net_no
-          + ", dest_type=" + destType
-          + ", dest_section=" + p_maze_search_result.section_no_of_door
-          + ", dest_room_ripped=" + curr_maze_search_element.room_ripped);
-    }
     if (curr_backtrack_door instanceof TargetItemExpansionDoor door) {
       curr_next_room = door.room;
     } else if (curr_backtrack_door instanceof ExpansionDrill curr_drill) {
@@ -223,7 +207,6 @@ public abstract class LocateFoundConnectionAlgo {
       }
     }
     BacktrackElement curr_backtrack_element = new BacktrackElement(curr_backtrack_door, p_maze_search_result.section_no_of_door, curr_next_room);
-    int step = 0;
     for (; ; ) {
       result.add(curr_backtrack_element);
       curr_backtrack_door = curr_maze_search_element.backtrack_door;
@@ -242,22 +225,6 @@ public abstract class LocateFoundConnectionAlgo {
       }
       curr_maze_search_element = curr_backtrack_door.get_maze_search_element(curr_section_no);
       curr_backtrack_element = new BacktrackElement(curr_backtrack_door, curr_section_no, curr_next_room);
-      if (debugBacktrack) {
-        String doorType = curr_backtrack_door.getClass().getSimpleName();
-        String nextRoomType = curr_next_room != null ? curr_next_room.getClass().getSimpleName() : "null";
-        int obstacleId = -1;
-        if (curr_next_room instanceof ObstacleExpansionRoom obst) {
-          obstacleId = obst.get_item().get_id_no();
-        }
-        FRLogger.trace("BACKTRACK_STEP net=" + p_net_no
-            + ", step=" + step
-            + ", door_type=" + doorType
-            + ", section=" + curr_section_no
-            + ", room_ripped=" + curr_maze_search_element.room_ripped
-            + ", ripup_cost=" + curr_maze_search_element.ripup_cost
-            + ", next_room_type=" + nextRoomType
-            + ", obstacle_id=" + obstacleId);
-      }
       if (curr_maze_search_element.room_ripped) {
         if (curr_next_room instanceof ObstacleExpansionRoom room) {
           p_ripped_item_list.add(room.get_item());
@@ -266,7 +233,6 @@ public abstract class LocateFoundConnectionAlgo {
           }
         }
       }
-      step++;
     }
     return result;
   }
@@ -400,19 +366,6 @@ public abstract class LocateFoundConnectionAlgo {
       corner_arr[i] = it2.next();
     }
     ResultItem result = new ResultItem(corner_arr, this.current_trace_layer);
-    if (this.ctrl.net_no == 33 || this.ctrl.net_no == 66 || this.ctrl.net_no == 67) {
-      IntPoint first = corner_arr.length > 0 ? corner_arr[0] : null;
-      IntPoint last = corner_arr.length > 0 ? corner_arr[corner_arr.length - 1] : null;
-      FRLogger.trace("compare_trace_next_trace_raw net=" + this.ctrl.net_no
-          + ", trace_layer=" + this.current_trace_layer
-          + ", next_layer=" + next_layer
-          + ", corner_count=" + corner_arr.length
-          + ", first=" + first
-          + ", last=" + last
-          + ", from_door=" + this.current_from_door_index
-          + ", to_door=" + this.current_to_door_index
-          + ", target_door=" + this.current_target_door_index);
-    }
     this.current_trace_layer = next_layer;
     return result;
   }
@@ -421,6 +374,107 @@ public abstract class LocateFoundConnectionAlgo {
    * Returns the next list of corners for the construction of the trace in calculate_next_trace. If the result is empty, the trace is already completed.
    */
   protected abstract Collection<FloatPoint> calculate_next_trace_corners();
+
+  boolean applyRouterIntentPairLocateGuide() {
+    if (!ctrl.hasRouterIntentPairLocateGuide()
+        || !(target_item instanceof Pin targetPin)
+        || !(start_item instanceof Pin startPin)
+        || target_layer != ctrl.router_intent_pair_locate_guide_layer
+        || start_layer != ctrl.router_intent_pair_locate_guide_layer) {
+      return false;
+    }
+
+    List<FloatPoint> leaderPath = new ArrayList<>(List.of(ctrl.router_intent_pair_locate_guide_path));
+    FloatPoint targetCenter = targetPin.get_center().to_float();
+    FloatPoint startCenter = startPin.get_center().to_float();
+    if (targetCenter.distance_square(leaderPath.get(leaderPath.size() - 1))
+        < targetCenter.distance_square(leaderPath.get(0))) {
+      java.util.Collections.reverse(leaderPath);
+    }
+    List<FloatPoint> offsetPath = offsetRouterIntentPairPath(
+        leaderPath,
+        ctrl.router_intent_pair_locate_guide_side * ctrl.router_intent_pair_locate_guide_spacing);
+    if (offsetPath.size() < 2) {
+      return false;
+    }
+
+    List<FloatPoint> guidedCorners = new ArrayList<>();
+    appendDistinct(guidedCorners, targetCenter);
+    appendDistinct(guidedCorners, calculate_additional_corner(
+        targetCenter,
+        offsetPath.get(0),
+        true,
+        angle_restriction));
+    for (FloatPoint point : offsetPath) {
+      appendDistinct(guidedCorners, point);
+    }
+    appendDistinct(guidedCorners, calculate_additional_corner(
+        offsetPath.get(offsetPath.size() - 1),
+        startCenter,
+        false,
+        angle_restriction));
+    appendDistinct(guidedCorners, startCenter);
+
+    List<IntPoint> roundedCorners = new ArrayList<>();
+    for (FloatPoint corner : guidedCorners) {
+      IntPoint rounded = corner.round();
+      if (roundedCorners.isEmpty() || !rounded.equals(roundedCorners.get(roundedCorners.size() - 1))) {
+        roundedCorners.add(rounded);
+      }
+    }
+    if (roundedCorners.size() < 2) {
+      return false;
+    }
+    connection_items.clear();
+    connection_items.add(new ResultItem(
+        roundedCorners.toArray(new IntPoint[0]),
+        ctrl.router_intent_pair_locate_guide_layer));
+    return true;
+  }
+
+  private static List<FloatPoint> offsetRouterIntentPairPath(
+      List<FloatPoint> path,
+      double signedSpacing) {
+    List<FloatLine> translatedSegments = new ArrayList<>();
+    for (int i = 1; i < path.size(); i++) {
+      FloatPoint start = path.get(i - 1);
+      FloatPoint end = path.get(i);
+      if (start != null && end != null && start.distance_square(end) > 1e-12) {
+        translatedSegments.add(new FloatLine(start, end).translate(signedSpacing));
+      }
+    }
+    if (translatedSegments.isEmpty()) {
+      return List.of();
+    }
+
+    List<FloatPoint> result = new ArrayList<>();
+    result.add(translatedSegments.get(0).a);
+    double maximumMiterDistance = Math.abs(signedSpacing) * 8.0 + 1.0;
+    for (int i = 1; i < translatedSegments.size(); i++) {
+      FloatLine previous = translatedSegments.get(i - 1);
+      FloatLine current = translatedSegments.get(i);
+      FloatPoint intersection = previous.intersection(current);
+      if (intersection == null
+          || !Double.isFinite(intersection.x)
+          || !Double.isFinite(intersection.y)
+          || intersection.distance(previous.b) > maximumMiterDistance
+          || intersection.distance(current.a) > maximumMiterDistance) {
+        intersection = previous.b.middle_point(current.a);
+      }
+      appendDistinct(result, intersection);
+    }
+    appendDistinct(result, translatedSegments.get(translatedSegments.size() - 1).b);
+    return result;
+  }
+
+  private static void appendDistinct(List<FloatPoint> points, FloatPoint point) {
+    if (point == null) {
+      return;
+    }
+    if (points.isEmpty() || points.get(points.size() - 1).distance_square(point) > 1e-12) {
+      points.add(point);
+    }
+  }
 
   /**
    * Test display of the baktrack rooms.

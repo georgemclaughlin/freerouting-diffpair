@@ -47,6 +47,11 @@ public class Session implements Serializable {
     RoutingJobScheduler.getInstance().enqueueJob(routingJob);
   }
 
+  /** Adds a fully configured job that is immediately eligible for scheduler pickup. */
+  public void addReadyJob(RoutingJob routingJob) {
+    RoutingJobScheduler.getInstance().enqueueReadyJob(routingJob);
+  }
+
   /**
    * Gets the unique identifier of the session.
    *

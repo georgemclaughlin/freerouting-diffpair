@@ -67,6 +67,42 @@ public class RoutingJobSchedulerTest {
   }
 
   @Test
+  void readyJobIsPublishedAtomicallyForSchedulerPickup() {
+    RoutingJob job = createTestJob();
+
+    synchronized (scheduler.jobs) {
+      scheduler.enqueueReadyJob(job);
+      assertTrue(scheduler.jobs.contains(job));
+      assertEquals(RoutingJobState.READY_TO_START, job.state);
+    }
+  }
+
+  @Test
+  void cliTimeoutCannotTerminateJobClaimedForSlowSetup() {
+    RoutingJob job = createTestJob();
+    synchronized (scheduler.jobs) {
+      job.state = RoutingJobState.READY_TO_START;
+      scheduler.jobs.add(job);
+      assertTrue(scheduler.claimReadyJobForStart(job));
+      assertFalse(scheduler.terminateReadyJobIfUnclaimed(job));
+      assertEquals(RoutingJobState.RUNNING, job.state);
+    }
+  }
+
+  @Test
+  void cliTimeoutTerminatesOnlyUnclaimedReadyJob() {
+    RoutingJob readyJob = createTestJob();
+    readyJob.state = RoutingJobState.READY_TO_START;
+    assertTrue(scheduler.terminateReadyJobIfUnclaimed(readyJob));
+    assertEquals(RoutingJobState.TERMINATED, readyJob.state);
+
+    RoutingJob queuedJob = createTestJob();
+    queuedJob.state = RoutingJobState.QUEUED;
+    assertFalse(scheduler.terminateReadyJobIfUnclaimed(queuedJob));
+    assertEquals(RoutingJobState.QUEUED, queuedJob.state);
+  }
+
+  @Test
   void testGetQueuePosition() {
     // Create test jobs
     RoutingJob job1 = createTestJob();

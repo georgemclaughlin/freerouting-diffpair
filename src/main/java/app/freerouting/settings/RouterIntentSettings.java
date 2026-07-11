@@ -1,17 +1,25 @@
 package app.freerouting.settings;
 
 import app.freerouting.util.gson.GsonProvider;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.annotations.SerializedName;
 import java.io.IOException;
-import java.io.Reader;
 import java.io.Serializable;
+import java.io.StringReader;
+import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,6 +27,7 @@ import java.util.Set;
 public class RouterIntentSettings implements Serializable, Cloneable {
   private static final String SCHEMA = "kicad-agent-router-intent";
   private static final int SCHEMA_VERSION = 6;
+  private static final Gson VALIDATION_GSON = new GsonBuilder().serializeNulls().create();
   private static final Set<String> TOP_LEVEL_KEYS = Set.of(
       "schema",
       "schema_version",
@@ -176,128 +185,415 @@ public class RouterIntentSettings implements Serializable, Cloneable {
   public BlockPortIntent[] blockPorts;
 
   private transient Map<String, NetIntent> netIntentByName;
+  private transient String intentSha256;
 
   public static RouterIntentSettings load(Path path) throws IOException {
-    try (Reader reader = Files.newBufferedReader(path)) {
+    byte[] payload = Files.readAllBytes(path);
+    String decodedPayload;
+    try {
+      decodedPayload = StandardCharsets.UTF_8.newDecoder()
+          .onMalformedInput(CodingErrorAction.REPORT)
+          .onUnmappableCharacter(CodingErrorAction.REPORT)
+          .decode(ByteBuffer.wrap(payload))
+          .toString();
+    } catch (CharacterCodingException e) {
+      throw new IllegalArgumentException("router intent payload must be valid UTF-8", e);
+    }
+
+    try (StringReader reader = new StringReader(decodedPayload)) {
       JsonElement rootElement = JsonParser.parseReader(reader);
       if (!rootElement.isJsonObject()) {
         throw new IllegalArgumentException("router intent payload root must be an object");
       }
       JsonObject root = rootElement.getAsJsonObject();
-      validateObjectKeys("router intent", root, TOP_LEVEL_KEYS);
-      validateNestedObjectKeys(root);
+      validatePayloadObject(root);
 
       RouterIntentSettings result = GsonProvider.GSON.fromJson(root, RouterIntentSettings.class);
       if (result == null) {
         throw new IllegalArgumentException("router intent payload is empty");
       }
       result.intentFile = path.toAbsolutePath().normalize().toString();
-      result.validateSchema();
+      result.intentSha256 = RouterApplicationReceipt.sha256(payload);
+      result.validateForApplicationReceipt();
       result.rebuildNetIntentIndex();
       return result;
     }
   }
 
-  private static void validateNestedObjectKeys(JsonObject root) {
-    JsonElement settingsElement = root.get("settings");
-    if (settingsElement != null && !settingsElement.isJsonNull()) {
-      if (!settingsElement.isJsonObject()) {
-        throw new IllegalArgumentException("router intent settings must be an object");
-      }
-      JsonObject settingsObject = settingsElement.getAsJsonObject();
-      validateObjectKeys("router intent settings", settingsObject, SETTINGS_KEYS);
-      validateOptionalStringValue("router intent settings", settingsObject, "route_order", ROUTE_ORDER_VALUES);
-      validateOptionalStringValue(
-          "router intent settings",
-          settingsObject,
-          "ripup_protection",
-          SETTINGS_RIPUP_PROTECTION_VALUES);
-    }
-
-    validateArrayObjectKeys(root, "net_intents", NET_INTENT_KEYS);
-    validateArrayObjectKeys(root, "critical_paths", CRITICAL_PATH_KEYS);
-    validateArrayObjectKeys(root, "differential_pairs", DIFFERENTIAL_PAIR_KEYS);
-    validateArrayObjectKeys(root, "route_length_matches", ROUTE_LENGTH_MATCH_KEYS);
-    validateArrayObjectKeys(root, "local_support", LOCAL_SUPPORT_KEYS);
-    validateArrayObjectKeys(root, "block_ports", BLOCK_PORT_KEYS);
-    validateArrayStringValues(root, "net_intents", "priority", PRIORITY_VALUES);
-    validateArrayStringValues(root, "net_intents", "scope", SCOPE_VALUES);
-    validateArrayStringValues(root, "net_intents", "net_type", NET_TYPE_VALUES);
-    validateArrayStringValues(root, "net_intents", "ripup_protection", RIPUP_PROTECTION_VALUES);
-    validateArrayStringValues(root, "critical_paths", "priority", PRIORITY_VALUES);
-    validateArrayStringValues(root, "differential_pairs", "priority", PRIORITY_VALUES);
-    validateArrayStringValues(root, "route_length_matches", "priority", PRIORITY_VALUES);
-    validateArrayStringValues(root, "local_support", "kind", LOCAL_SUPPORT_KIND_VALUES);
-    validateArrayStringValues(root, "local_support", "priority", PRIORITY_VALUES);
-    validateArrayStringValues(root, "block_ports", "kind", BLOCK_PORT_KIND_VALUES);
+  public String intentSha256() {
+    return this.intentSha256;
   }
 
-  private static void validateArrayObjectKeys(JsonObject root, String field, Set<String> allowedKeys) {
-    JsonElement arrayElement = root.get(field);
-    if (arrayElement == null || arrayElement.isJsonNull()) {
-      return;
+  /** Revalidates the mutable intent object before its support receipt is emitted. */
+  void validateForApplicationReceipt() {
+    JsonObject root = VALIDATION_GSON.toJsonTree(this).getAsJsonObject();
+    root.remove("intent_file");
+    validatePayloadObject(root);
+  }
+
+  private static void validatePayloadObject(JsonObject root) {
+    validateExactObjectKeys("router intent", root, TOP_LEVEL_KEYS);
+    String schema = requireString(root, "schema", "router intent", false);
+    if (!SCHEMA.equals(schema)) {
+      throw new IllegalArgumentException("unsupported router intent schema: " + schema);
     }
-    if (!arrayElement.isJsonArray()) {
-      throw new IllegalArgumentException("router intent " + field + " must be an array");
+    requireInteger(root, "schema_version", "router intent", SCHEMA_VERSION, SCHEMA_VERSION, false);
+    requireString(root, "profile", "router intent", false);
+
+    JsonObject settingsObject = requireObject(root, "settings", "router intent");
+    validateExactObjectKeys("router intent settings", settingsObject, SETTINGS_KEYS);
+    requireInteger(settingsObject, "deterministic_seed", "router intent settings", 0, Integer.MAX_VALUE, false);
+    requireBoolean(settingsObject, "single_thread_default", "router intent settings");
+    requireEnum(settingsObject, "route_order", "router intent settings", ROUTE_ORDER_VALUES);
+    requireEnum(
+        settingsObject,
+        "ripup_protection",
+        "router intent settings",
+        SETTINGS_RIPUP_PROTECTION_VALUES);
+
+    Set<String> netNames = new HashSet<>();
+    Set<String> objectiveIds = new HashSet<>();
+    Set<String> pairNets = new HashSet<>();
+    for (JsonObject entry : requireObjectArray(root, "net_intents", "router intent")) {
+      validateExactObjectKeys("router intent net_intents entry", entry, NET_INTENT_KEYS);
+      String net = requireString(entry, "net", "router intent net_intents entry", false);
+      requireUnique(netNames, net, "router intent net_intents net");
+      requireEnum(entry, "net_type", "router intent net_intents entry", NET_TYPE_VALUES);
+      requireEnum(entry, "priority", "router intent net_intents entry", PRIORITY_VALUES);
+      requireEnum(entry, "scope", "router intent net_intents entry", SCOPE_VALUES);
+      requireInteger(entry, "route_order_rank", "router intent net_intents entry", 0, Integer.MAX_VALUE, false);
+      requireStringArray(entry, "preferred_layers", "router intent net_intents entry", 0, Integer.MAX_VALUE);
+      requireStringArray(entry, "plane_layers", "router intent net_intents entry", 0, Integer.MAX_VALUE);
+      requireString(entry, "route_class", "router intent net_intents entry", true);
+      requireFiniteNumber(entry, "track_width_mm", "router intent net_intents entry", 0.0, false, null, true);
+      requireFiniteNumber(entry, "clearance_mm", "router intent net_intents entry", 0.0, false, null, true);
+      requireFiniteNumber(entry, "via_diameter_mm", "router intent net_intents entry", 0.0, false, null, true);
+      requireFiniteNumber(entry, "via_drill_mm", "router intent net_intents entry", 0.0, false, null, true);
+      requireEnum(entry, "ripup_protection", "router intent net_intents entry", RIPUP_PROTECTION_VALUES);
+      requireStringArray(entry, "critical_path_ids", "router intent net_intents entry", 0, Integer.MAX_VALUE);
+      requireStringArray(entry, "differential_pair_ids", "router intent net_intents entry", 0, Integer.MAX_VALUE);
+      requireStringArray(entry, "route_length_match_ids", "router intent net_intents entry", 0, Integer.MAX_VALUE);
+      requireStringArray(entry, "local_support_ids", "router intent net_intents entry", 0, Integer.MAX_VALUE);
+      requireStringArray(entry, "block_port_ids", "router intent net_intents entry", 0, Integer.MAX_VALUE);
+      requireStringArray(entry, "source_copper_ids", "router intent net_intents entry", 0, Integer.MAX_VALUE);
     }
-    for (JsonElement element : arrayElement.getAsJsonArray()) {
-      if (!element.isJsonObject()) {
-        throw new IllegalArgumentException("router intent " + field + " entries must be objects");
+
+    for (JsonObject entry : requireObjectArray(root, "critical_paths", "router intent")) {
+      validateExactObjectKeys("router intent critical_paths entry", entry, CRITICAL_PATH_KEYS);
+      requireUnique(
+          objectiveIds,
+          requireString(entry, "id", "router intent critical_paths entry", false),
+          "router intent objective id");
+      requireString(entry, "net", "router intent critical_paths entry", false);
+      requireEnum(entry, "priority", "router intent critical_paths entry", PRIORITY_VALUES);
+      requireString(entry, "from", "router intent critical_paths entry", false);
+      requireString(entry, "to", "router intent critical_paths entry", false);
+      requireStringArray(entry, "preferred_layers", "router intent critical_paths entry", 0, Integer.MAX_VALUE);
+      requireFiniteNumber(entry, "max_length_mm", "router intent critical_paths entry", 0.0, false, null, true);
+      requireFiniteNumber(entry, "max_extra_mm", "router intent critical_paths entry", 0.0, true, null, true);
+      requireFiniteNumber(entry, "max_ratio", "router intent critical_paths entry", 1.0, true, null, true);
+    }
+
+    for (JsonObject entry : requireObjectArray(root, "differential_pairs", "router intent")) {
+      validateExactObjectKeys("router intent differential_pairs entry", entry, DIFFERENTIAL_PAIR_KEYS);
+      requireUnique(
+          objectiveIds,
+          requireString(entry, "id", "router intent differential_pairs entry", false),
+          "router intent objective id");
+      String positiveNet = requireString(entry, "positive_net", "router intent differential_pairs entry", false);
+      String negativeNet = requireString(entry, "negative_net", "router intent differential_pairs entry", false);
+      if (positiveNet.equals(negativeNet)) {
+        throw new IllegalArgumentException("router intent differential pair nets must differ");
       }
-      validateObjectKeys("router intent " + field + " entry", element.getAsJsonObject(), allowedKeys);
+      requireUnique(pairNets, positiveNet, "router intent differential pair member net");
+      requireUnique(pairNets, negativeNet, "router intent differential pair member net");
+      requireEnum(entry, "priority", "router intent differential_pairs entry", PRIORITY_VALUES);
+      String positiveFrom = requireString(entry, "positive_from", "router intent differential_pairs entry", true);
+      String positiveTo = requireString(entry, "positive_to", "router intent differential_pairs entry", true);
+      String negativeFrom = requireString(entry, "negative_from", "router intent differential_pairs entry", true);
+      String negativeTo = requireString(entry, "negative_to", "router intent differential_pairs entry", true);
+      boolean anyEndpoint = positiveFrom != null || positiveTo != null || negativeFrom != null || negativeTo != null;
+      boolean allEndpoints = positiveFrom != null && positiveTo != null && negativeFrom != null && negativeTo != null;
+      if (anyEndpoint != allEndpoints) {
+        throw new IllegalArgumentException("router intent differential pair endpoints must be all present or all null");
+      }
+      requireStringArray(
+          entry, "positive_preferred_layers", "router intent differential_pairs entry", 0, Integer.MAX_VALUE);
+      requireStringArray(
+          entry, "negative_preferred_layers", "router intent differential_pairs entry", 0, Integer.MAX_VALUE);
+      requireStringArray(entry, "allowed_layers", "router intent differential_pairs entry", 0, Integer.MAX_VALUE);
+      requireBoolean(entry, "same_layer_required", "router intent differential_pairs entry");
+      requireInteger(entry, "max_vias_per_net", "router intent differential_pairs entry", 0, Integer.MAX_VALUE, true);
+      requireBoolean(entry, "matched_via_transitions_required", "router intent differential_pairs entry");
+      requireBoolean(entry, "route_as_coupled_pair", "router intent differential_pairs entry");
+      requireFiniteNumber(entry, "target_width_mm", "router intent differential_pairs entry", 0.0, false, null, true);
+      Double targetGap = requireFiniteNumber(
+          entry, "target_gap_mm", "router intent differential_pairs entry", 0.0, false, null, true);
+      Double gapTolerance = requireFiniteNumber(
+          entry, "gap_tolerance_mm", "router intent differential_pairs entry", 0.0, true, null, true);
+      if (gapTolerance != null && targetGap == null) {
+        throw new IllegalArgumentException("router intent differential pair gap tolerance requires a target gap");
+      }
+      Double escapeWidth = requireFiniteNumber(
+          entry, "endpoint_escape_width_mm", "router intent differential_pairs entry", 0.0, false, null, true);
+      Double escapeLength = requireFiniteNumber(
+          entry, "endpoint_escape_length_mm", "router intent differential_pairs entry", 0.0, false, null, true);
+      if ((escapeWidth == null) != (escapeLength == null)) {
+        throw new IllegalArgumentException("router intent differential pair escape width and length must both be present");
+      }
+      if (escapeWidth != null && !allEndpoints) {
+        throw new IllegalArgumentException("router intent differential pair escape requires all endpoints");
+      }
+      requireFiniteNumber(entry, "max_skew_mm", "router intent differential_pairs entry", 0.0, true, null, true);
+      requireFiniteNumber(entry, "max_stub_mm", "router intent differential_pairs entry", 0.0, true, null, true);
+      requireFiniteNumber(
+          entry, "min_parallel_length_ratio", "router intent differential_pairs entry", 0.0, true, 1.0, true);
+      requireFiniteNumber(
+          entry, "max_uncoupled_length_mm", "router intent differential_pairs entry", 0.0, true, null, true);
+      requireBoolean(entry, "require_parallel_evidence", "router intent differential_pairs entry");
+    }
+
+    for (JsonObject entry : requireObjectArray(root, "route_length_matches", "router intent")) {
+      validateExactObjectKeys("router intent route_length_matches entry", entry, ROUTE_LENGTH_MATCH_KEYS);
+      requireUnique(
+          objectiveIds,
+          requireString(entry, "id", "router intent route_length_matches entry", false),
+          "router intent objective id");
+      requireStringArray(entry, "nets", "router intent route_length_matches entry", 2, 32);
+      requireEnum(entry, "priority", "router intent route_length_matches entry", PRIORITY_VALUES);
+      requireFiniteNumber(entry, "max_skew_mm", "router intent route_length_matches entry", 0.0, true, null, false);
+    }
+
+    for (JsonObject entry : requireObjectArray(root, "local_support", "router intent")) {
+      validateExactObjectKeys("router intent local_support entry", entry, LOCAL_SUPPORT_KEYS);
+      requireUnique(
+          objectiveIds,
+          requireString(entry, "id", "router intent local_support entry", false),
+          "router intent objective id");
+      requireEnum(entry, "kind", "router intent local_support entry", LOCAL_SUPPORT_KIND_VALUES);
+      requireStringArray(entry, "nets", "router intent local_support entry", 1, Integer.MAX_VALUE);
+      requireStringArray(entry, "pad_refs", "router intent local_support entry", 0, Integer.MAX_VALUE);
+      requireEnum(entry, "priority", "router intent local_support entry", PRIORITY_VALUES);
+      requireStringArray(entry, "preferred_layers", "router intent local_support entry", 0, Integer.MAX_VALUE);
+      requireFiniteNumber(entry, "max_distance_mm", "router intent local_support entry", 0.0, true, null, true);
+      requireFiniteNumber(
+          entry, "max_return_distance_mm", "router intent local_support entry", 0.0, true, null, true);
+    }
+
+    for (JsonObject entry : requireObjectArray(root, "block_ports", "router intent")) {
+      validateExactObjectKeys("router intent block_ports entry", entry, BLOCK_PORT_KEYS);
+      requireUnique(
+          objectiveIds,
+          requireString(entry, "id", "router intent block_ports entry", false),
+          "router intent objective id");
+      requireString(entry, "block", "router intent block_ports entry", false);
+      requireString(entry, "port", "router intent block_ports entry", false);
+      requireEnum(entry, "kind", "router intent block_ports entry", BLOCK_PORT_KIND_VALUES);
+      requireString(entry, "net", "router intent block_ports entry", false);
+      String padRef = requireString(entry, "pad_ref", "router intent block_ports entry", true);
+      Double x = requireFiniteNumber(entry, "x_mm", "router intent block_ports entry", null, true, null, true);
+      Double y = requireFiniteNumber(entry, "y_mm", "router intent block_ports entry", null, true, null, true);
+      if ((padRef != null) == (x != null || y != null) || (x == null) != (y == null)) {
+        throw new IllegalArgumentException("router intent block port must use exactly one complete point form");
+      }
+      String boundaryName = requireString(entry, "boundary_name", "router intent block_ports entry", true);
+      Double boundaryX = requireFiniteNumber(
+          entry, "boundary_center_x_mm", "router intent block_ports entry", null, true, null, true);
+      Double boundaryY = requireFiniteNumber(
+          entry, "boundary_center_y_mm", "router intent block_ports entry", null, true, null, true);
+      Double boundaryWidth = requireFiniteNumber(
+          entry, "boundary_width_mm", "router intent block_ports entry", 0.0, false, null, true);
+      Double boundaryHeight = requireFiniteNumber(
+          entry, "boundary_height_mm", "router intent block_ports entry", 0.0, false, null, true);
+      int boundaryParts = (boundaryName == null ? 0 : 1)
+          + (boundaryX == null ? 0 : 1)
+          + (boundaryY == null ? 0 : 1)
+          + (boundaryWidth == null ? 0 : 1)
+          + (boundaryHeight == null ? 0 : 1);
+      if (boundaryParts != 0 && boundaryParts != 5) {
+        throw new IllegalArgumentException("router intent block port boundary must be complete or null");
+      }
     }
   }
 
-  private static void validateObjectKeys(String label, JsonObject object, Set<String> allowedKeys) {
+  private static void validateExactObjectKeys(String label, JsonObject object, Set<String> expectedKeys) {
     for (String key : object.keySet()) {
-      if (!allowedKeys.contains(key)) {
+      if (!expectedKeys.contains(key)) {
         throw new IllegalArgumentException(label + " has unsupported field: " + key);
       }
     }
-  }
-
-  private static void validateArrayStringValues(
-      JsonObject root,
-      String arrayField,
-      String valueField,
-      Set<String> allowedValues) {
-    JsonElement arrayElement = root.get(arrayField);
-    if (arrayElement == null || arrayElement.isJsonNull()) {
-      return;
-    }
-    for (JsonElement element : arrayElement.getAsJsonArray()) {
-      validateOptionalStringValue(
-          "router intent " + arrayField + " entry",
-          element.getAsJsonObject(),
-          valueField,
-          allowedValues);
+    for (String key : expectedKeys) {
+      if (!object.has(key)) {
+        throw new IllegalArgumentException(label + " is missing required field: " + key);
+      }
     }
   }
 
-  private static void validateOptionalStringValue(
-      String label,
-      JsonObject object,
-      String field,
-      Set<String> allowedValues) {
-    JsonElement valueElement = object.get(field);
-    if (valueElement == null || valueElement.isJsonNull()) {
-      return;
+  private static JsonObject requireObject(JsonObject object, String field, String label) {
+    JsonElement value = requiredValue(object, field, label);
+    if (!value.isJsonObject()) {
+      throw new IllegalArgumentException(label + " field " + field + " must be an object");
     }
-    if (!valueElement.isJsonPrimitive() || !valueElement.getAsJsonPrimitive().isString()) {
+    return value.getAsJsonObject();
+  }
+
+  private static List<JsonObject> requireObjectArray(JsonObject object, String field, String label) {
+    JsonElement value = requiredValue(object, field, label);
+    if (!value.isJsonArray()) {
+      throw new IllegalArgumentException(label + " field " + field + " must be an array");
+    }
+    List<JsonObject> result = new ArrayList<>();
+    for (JsonElement entry : value.getAsJsonArray()) {
+      if (!entry.isJsonObject()) {
+        throw new IllegalArgumentException(label + " field " + field + " entries must be objects");
+      }
+      result.add(entry.getAsJsonObject());
+    }
+    return result;
+  }
+
+  private static String requireString(JsonObject object, String field, String label, boolean nullable) {
+    JsonElement value = requiredValue(object, field, label);
+    if (value.isJsonNull()) {
+      if (nullable) {
+        return null;
+      }
+      throw new IllegalArgumentException(label + " field " + field + " must not be null");
+    }
+    if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
       throw new IllegalArgumentException(label + " field " + field + " must be a string");
     }
-    String value = valueElement.getAsString();
+    String result = value.getAsString();
+    if (result.isBlank()) {
+      throw new IllegalArgumentException(label + " field " + field + " must not be blank");
+    }
+    return result;
+  }
+
+  private static void requireBoolean(JsonObject object, String field, String label) {
+    JsonElement value = requiredValue(object, field, label);
+    if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) {
+      throw new IllegalArgumentException(label + " field " + field + " must be a boolean");
+    }
+  }
+
+  private static Integer requireInteger(
+      JsonObject object,
+      String field,
+      String label,
+      int minimum,
+      int maximum,
+      boolean nullable) {
+    JsonElement value = requiredValue(object, field, label);
+    if (value.isJsonNull()) {
+      if (nullable) {
+        return null;
+      }
+      throw new IllegalArgumentException(label + " field " + field + " must not be null");
+    }
+    if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
+      throw new IllegalArgumentException(label + " field " + field + " must be an integer");
+    }
+    try {
+      BigDecimal decimal = value.getAsBigDecimal();
+      int result = decimal.intValueExact();
+      if (result < minimum || result > maximum) {
+        throw new IllegalArgumentException(
+            label + " field " + field + " must be between " + minimum + " and " + maximum);
+      }
+      return result;
+    } catch (ArithmeticException | NumberFormatException e) {
+      throw new IllegalArgumentException(label + " field " + field + " must be an integer", e);
+    }
+  }
+
+  private static Double requireFiniteNumber(
+      JsonObject object,
+      String field,
+      String label,
+      Double minimum,
+      boolean minimumInclusive,
+      Double maximum,
+      boolean nullable) {
+    JsonElement value = requiredValue(object, field, label);
+    if (value.isJsonNull()) {
+      if (nullable) {
+        return null;
+      }
+      throw new IllegalArgumentException(label + " field " + field + " must not be null");
+    }
+    if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
+      throw new IllegalArgumentException(label + " field " + field + " must be a number");
+    }
+    double result;
+    try {
+      result = value.getAsDouble();
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException(label + " field " + field + " must be a number", e);
+    }
+    if (!Double.isFinite(result)) {
+      throw new IllegalArgumentException(label + " field " + field + " must be finite");
+    }
+    if (minimum != null && (result < minimum || (!minimumInclusive && result == minimum))) {
+      String comparison = minimumInclusive ? "at least " : "greater than ";
+      throw new IllegalArgumentException(label + " field " + field + " must be " + comparison + minimum);
+    }
+    if (maximum != null && result > maximum) {
+      throw new IllegalArgumentException(label + " field " + field + " must be at most " + maximum);
+    }
+    return result;
+  }
+
+  private static String[] requireStringArray(
+      JsonObject object,
+      String field,
+      String label,
+      int minimumSize,
+      int maximumSize) {
+    JsonElement value = requiredValue(object, field, label);
+    if (!value.isJsonArray()) {
+      throw new IllegalArgumentException(label + " field " + field + " must be an array");
+    }
+    int size = value.getAsJsonArray().size();
+    if (size < minimumSize || size > maximumSize) {
+      throw new IllegalArgumentException(
+          label + " field " + field + " must contain between " + minimumSize + " and " + maximumSize + " entries");
+    }
+    String[] result = new String[size];
+    Set<String> uniqueValues = new HashSet<>();
+    for (int index = 0; index < size; index++) {
+      JsonElement entry = value.getAsJsonArray().get(index);
+      if (!entry.isJsonPrimitive() || !entry.getAsJsonPrimitive().isString() || entry.getAsString().isBlank()) {
+        throw new IllegalArgumentException(label + " field " + field + " entries must be non-blank strings");
+      }
+      result[index] = entry.getAsString();
+      requireUnique(uniqueValues, result[index], label + " field " + field + " entry");
+    }
+    return result;
+  }
+
+  private static void requireEnum(
+      JsonObject object,
+      String field,
+      String label,
+      Set<String> allowedValues) {
+    String value = requireString(object, field, label, false);
     if (!allowedValues.contains(value)) {
       throw new IllegalArgumentException(label + " field " + field + " has unsupported value: " + value);
     }
   }
 
-  private void validateSchema() {
-    if (!SCHEMA.equals(this.schema)) {
-      throw new IllegalArgumentException("unsupported router intent schema: " + this.schema);
+  private static JsonElement requiredValue(JsonObject object, String field, String label) {
+    JsonElement result = object.get(field);
+    if (result == null) {
+      throw new IllegalArgumentException(label + " is missing required field: " + field);
     }
-    if (!Integer.valueOf(SCHEMA_VERSION).equals(this.schemaVersion)) {
-      throw new IllegalArgumentException("unsupported router intent schema_version: " + this.schemaVersion);
+    return result;
+  }
+
+  private static void requireUnique(Set<String> values, String value, String label) {
+    if (!values.add(value)) {
+      throw new IllegalArgumentException(label + " must be unique: " + value);
     }
   }
 
@@ -406,10 +702,14 @@ public class RouterIntentSettings implements Serializable, Cloneable {
     return pair == null ? null : pair.gapToleranceMm;
   }
 
+  public Double differentialPairTargetWidthMmForNet(String netName) {
+    DifferentialPairIntent pair = differentialPairForNet(netName);
+    return pair == null ? null : pair.targetWidthMm;
+  }
+
   public boolean isHardDifferentialPairLayerForNet(String netName, String layerName) {
     DifferentialPairIntent pair = differentialPairForNet(netName);
-    if (pair == null || !Boolean.TRUE.equals(pair.sameLayerRequired) || pair.allowedLayers == null
-        || pair.allowedLayers.length == 0) {
+    if (pair == null || pair.allowedLayers == null || pair.allowedLayers.length == 0) {
       return true;
     }
     for (String allowedLayer : pair.allowedLayers) {
