@@ -10,11 +10,14 @@ import app.freerouting.board.RoutingBoard;
 import app.freerouting.board.Trace;
 import app.freerouting.board.Unit;
 import app.freerouting.board.Via;
+import app.freerouting.core.Padstack;
 import app.freerouting.core.RoutingJob;
 import app.freerouting.drc.ClearanceViolation;
 import app.freerouting.drc.DesignRulesChecker;
+import app.freerouting.geometry.planar.Area;
 import app.freerouting.geometry.planar.FloatPoint;
 import app.freerouting.geometry.planar.IntBox;
+import app.freerouting.geometry.planar.Shape;
 import app.freerouting.rules.Net;
 import app.freerouting.settings.RouterIntentSettings;
 import java.time.Duration;
@@ -45,6 +48,7 @@ public final class RouterIntentObjectiveRefiner {
   private static final int MAX_ORDER_CANDIDATES = 8;
   private static final Duration MAX_REFINEMENT_DURATION = Duration.ofSeconds(120);
   private static final double EPSILON_MM = 1e-6;
+  private static final double RETAINED_TRACE_COORDINATE_EPSILON = 1e-6;
   private static final double PARALLEL_SINE_TOLERANCE = Math.sin(Math.toRadians(10.0));
 
   private RouterIntentObjectiveRefiner() {
@@ -56,15 +60,55 @@ public final class RouterIntentObjectiveRefiner {
     }
   }
 
-  public record RetainedCopper(Set<Integer> itemIds, String signature) {
-    public RetainedCopper {
-      itemIds = Set.copyOf(itemIds);
+  public static final class RetainedCopper {
+    private final Set<Integer> itemIds;
+    private final String signature;
+    private final Map<Integer, RetainedItemSnapshot> snapshots;
+
+    private RetainedCopper(
+        Set<Integer> itemIds,
+        String signature,
+        Map<Integer, RetainedItemSnapshot> snapshots) {
+      this.itemIds = Set.copyOf(itemIds);
+      this.signature = signature;
+      this.snapshots = Map.copyOf(snapshots);
     }
+
+    public Set<Integer> itemIds() {
+      return itemIds;
+    }
+
+    public String signature() {
+      return signature;
+    }
+  }
+
+  record CoverageInterval(double start, double end, int itemId) {
+  }
+
+  private record TraceAttributes(
+      FixedState fixedState,
+      int clearanceClass,
+      List<Integer> netNumbers,
+      int layer,
+      int halfWidth) {
+  }
+
+  private record TraceGeometry(
+      int itemId,
+      TraceAttributes attributes,
+      List<FloatPoint> corners) {
+  }
+
+  private record RetainedItemSnapshot(
+      int itemId,
+      String identity,
+      TraceGeometry traceGeometry) {
   }
 
   public static RetainedCopper captureRetainedCopper(RoutingBoard board) {
     if (board == null) {
-      return new RetainedCopper(Set.of(), "");
+      return new RetainedCopper(Set.of(), "", Map.of());
     }
     Set<Integer> itemIds = new HashSet<>();
     for (Item item : board.get_items()) {
@@ -73,7 +117,7 @@ public final class RouterIntentObjectiveRefiner {
         itemIds.add(item.get_id_no());
       }
     }
-    return new RetainedCopper(itemIds, retainedCopperSignature(board, itemIds));
+    return captureRetainedCopper(board, itemIds);
   }
 
   public static Result refine(RoutingJob job) {
@@ -90,14 +134,20 @@ public final class RouterIntentObjectiveRefiner {
       return new Result(job == null ? null : job.board, 0);
     }
 
-    if (retainedCopper == null
-        || !retainedCopper.signature().equals(retainedCopperSignature(job.board, retainedCopper.itemIds()))) {
-      job.logInfo("Router-intent objective refinement skipped because retained source copper changed during routing.");
+    RouterIntentSettings intent = job.routerSettings.intent;
+    if (!intent.hasDifferentialPairIntents() && !intent.hasRouteLengthMatchIntents()) {
       return new Result(job.board, 0);
     }
 
-    RouterIntentSettings intent = job.routerSettings.intent;
-    if (!intent.hasDifferentialPairIntents() && !intent.hasRouteLengthMatchIntents()) {
+    long deadlineNanos = System.nanoTime() + MAX_REFINEMENT_DURATION.toNanos();
+    retainedCopper = reconcileRetainedCopper(job, retainedCopper, deadlineNanos);
+    if (retainedCopper == null) {
+      if (deadlineReached(job, deadlineNanos)) {
+        job.logInfo("Router-intent objective refinement skipped because retained-copper reconciliation "
+            + "exceeded the refinement budget or a stop was requested.");
+      } else {
+        job.logInfo("Router-intent objective refinement skipped because retained source copper changed during routing.");
+      }
       return new Result(job.board, 0);
     }
 
@@ -107,7 +157,6 @@ public final class RouterIntentObjectiveRefiner {
       return new Result(job.board, 0);
     }
 
-    long deadlineNanos = System.nanoTime() + MAX_REFINEMENT_DURATION.toNanos();
     RoutingBoard acceptedBoard = job.board;
     ObjectiveProtection objectiveProtection = ObjectiveProtection.capturePassing(acceptedBoard, intent);
     int acceptedCount = 0;
@@ -1235,6 +1284,417 @@ public final class RouterIntentObjectiveRefiner {
     return false;
   }
 
+  private static RetainedCopper captureRetainedCopper(
+      RoutingBoard board,
+      Set<Integer> retainedItemIds) {
+    Map<Integer, RetainedItemSnapshot> snapshots = new LinkedHashMap<>();
+    for (Item item : board.get_items()) {
+      if (!retainedItemIds.contains(item.get_id_no())) {
+        continue;
+      }
+      snapshots.put(item.get_id_no(), retainedItemSnapshot(item));
+    }
+    return retainedCopperFromSnapshots(snapshots);
+  }
+
+  private static RetainedCopper retainedCopperFromSnapshots(
+      Map<Integer, RetainedItemSnapshot> snapshots) {
+    Map<Integer, String> records = new java.util.TreeMap<>();
+    for (RetainedItemSnapshot snapshot : snapshots.values()) {
+      records.put(snapshot.itemId(), snapshot.itemId() + "|" + snapshot.identity());
+    }
+    return new RetainedCopper(
+        snapshots.keySet(),
+        String.join("\n", records.values()),
+        snapshots);
+  }
+
+  private static RetainedItemSnapshot retainedItemSnapshot(Item item) {
+    TraceGeometry traceGeometry = item instanceof PolylineTrace trace
+        ? traceGeometry(trace)
+        : null;
+    return new RetainedItemSnapshot(
+        item.get_id_no(),
+        copperIdentityRecord(item),
+        traceGeometry);
+  }
+
+  private static TraceGeometry traceGeometry(PolylineTrace trace) {
+    return new TraceGeometry(
+        trace.get_id_no(),
+        traceAttributes(trace),
+        List.copyOf(Arrays.asList(trace.polyline().corner_approx_arr())));
+  }
+
+  private static TraceAttributes traceAttributes(PolylineTrace trace) {
+    List<Integer> netNumbers = new ArrayList<>();
+    for (int index = 0; index < trace.net_count(); index++) {
+      netNumbers.add(trace.get_net_no(index));
+    }
+    return new TraceAttributes(
+        trace.get_fixed_state(),
+        trace.clearance_class_no(),
+        List.copyOf(netNumbers),
+        trace.get_layer(),
+        trace.get_half_width());
+  }
+
+  /**
+   * Rebinds retained source copper to the current board after ordinary routing.
+   *
+   * <p>Freerouting legitimately replaces a shove-fixed trace with two shove-fixed descendants
+   * when a same-net branch lands on its interior. The electrical copper is unchanged, but the
+   * item id and record signature are not. Reconciliation accepts only exact attribute matches
+   * whose collinear pieces preserve the complete captured trace union. Other copper kinds still
+   * require an exact identity match; no moved, narrowed, re-layered, or unfixed copper is accepted.
+   */
+  private static RetainedCopper reconcileRetainedCopper(
+      RoutingJob job,
+      RetainedCopper retainedCopper,
+      long deadlineNanos) {
+    RoutingBoard board = job == null ? null : job.board;
+    if (board == null || retainedCopper == null) {
+      return null;
+    }
+
+    Map<Integer, String> currentIdentities = new HashMap<>();
+    Map<Integer, TraceGeometry> currentTraceGeometries = new HashMap<>();
+    Map<String, List<Integer>> currentItemsByIdentity = new HashMap<>();
+    Map<TraceAttributes, List<TraceGeometry>> currentTracesByAttributes = new HashMap<>();
+    for (Item item : board.get_items()) {
+      if (deadlineReached(job, deadlineNanos)) {
+        return null;
+      }
+      if (!(item instanceof Trace || item instanceof Via || item instanceof ConductionArea)
+          || item.get_fixed_state() == FixedState.UNFIXED) {
+        continue;
+      }
+      String identity = copperIdentityRecord(item);
+      currentIdentities.put(item.get_id_no(), identity);
+      currentItemsByIdentity.computeIfAbsent(identity, ignored -> new ArrayList<>())
+          .add(item.get_id_no());
+      if (item instanceof PolylineTrace trace) {
+        TraceGeometry geometry = traceGeometry(trace);
+        currentTraceGeometries.put(item.get_id_no(), geometry);
+        currentTracesByAttributes
+            .computeIfAbsent(geometry.attributes(), ignored -> new ArrayList<>())
+            .add(geometry);
+      }
+    }
+    for (List<Integer> matchingIds : currentItemsByIdentity.values()) {
+      matchingIds.sort(Integer::compareTo);
+    }
+    for (List<TraceGeometry> matchingTraces : currentTracesByAttributes.values()) {
+      matchingTraces.sort(Comparator.comparingInt(TraceGeometry::itemId));
+    }
+
+    if (retainedCopper.signature().equals(
+        retainedCopperSignature(currentIdentities, retainedCopper.itemIds()))) {
+      return retainedCopper;
+    }
+
+    Map<TraceAttributes, List<TraceGeometry>> capturedTracesByAttributes = new HashMap<>();
+    for (RetainedItemSnapshot snapshot : retainedCopper.snapshots.values()) {
+      if (deadlineReached(job, deadlineNanos)) {
+        return null;
+      }
+      if (snapshot.traceGeometry() != null) {
+        capturedTracesByAttributes
+            .computeIfAbsent(snapshot.traceGeometry().attributes(), ignored -> new ArrayList<>())
+            .add(snapshot.traceGeometry());
+      }
+    }
+
+    Map<TraceAttributes, List<TraceGeometry>> containedCurrentTracesByAttributes = new HashMap<>();
+    for (Map.Entry<TraceAttributes, List<TraceGeometry>> entry
+        : currentTracesByAttributes.entrySet()) {
+      if (deadlineReached(job, deadlineNanos)) {
+        return null;
+      }
+      List<TraceGeometry> capturedUnion = capturedTracesByAttributes.get(entry.getKey());
+      if (capturedUnion == null || capturedUnion.isEmpty()) {
+        continue;
+      }
+      List<TraceGeometry> contained = new ArrayList<>();
+      for (TraceGeometry current : entry.getValue()) {
+        if (deadlineReached(job, deadlineNanos)) {
+          return null;
+        }
+        if (traceGeometryCoveredByUnion(
+            current, capturedUnion, job, deadlineNanos)) {
+          contained.add(current);
+        }
+      }
+      if (!contained.isEmpty()) {
+        containedCurrentTracesByAttributes.put(entry.getKey(), List.copyOf(contained));
+      }
+    }
+
+    Set<Integer> reconciledIds = new LinkedHashSet<>();
+    for (RetainedItemSnapshot snapshot : retainedCopper.snapshots.values()) {
+      if (deadlineReached(job, deadlineNanos)) {
+        return null;
+      }
+      if (snapshot.traceGeometry() == null
+          && snapshot.identity().equals(currentIdentities.get(snapshot.itemId()))) {
+        reconciledIds.add(snapshot.itemId());
+      }
+    }
+    for (RetainedItemSnapshot snapshot : retainedCopper.snapshots.values()) {
+      if (deadlineReached(job, deadlineNanos)) {
+        return null;
+      }
+      String sameIdIdentity = currentIdentities.get(snapshot.itemId());
+      if (snapshot.identity().equals(sameIdIdentity)) {
+        reconciledIds.add(snapshot.itemId());
+        continue;
+      }
+
+      if (snapshot.traceGeometry() != null) {
+        List<TraceGeometry> candidates = containedCurrentTracesByAttributes.getOrDefault(
+            snapshot.traceGeometry().attributes(), List.of());
+        Set<Integer> coveringIds = retainedTraceCoverageIds(
+            snapshot.traceGeometry(), candidates, job, deadlineNanos);
+        if (coveringIds.isEmpty()) {
+          return null;
+        }
+        reconciledIds.addAll(coveringIds);
+        continue;
+      }
+
+      Integer exactReplacementId = null;
+      for (int candidateId : currentItemsByIdentity.getOrDefault(snapshot.identity(), List.of())) {
+        if (deadlineReached(job, deadlineNanos)) {
+          return null;
+        }
+        if (!reconciledIds.contains(candidateId)) {
+          exactReplacementId = candidateId;
+          break;
+        }
+      }
+      if (exactReplacementId == null) {
+        return null;
+      }
+      reconciledIds.add(exactReplacementId);
+    }
+
+    if (deadlineReached(job, deadlineNanos)) {
+      return null;
+    }
+    Map<Integer, RetainedItemSnapshot> reconciledSnapshots = new LinkedHashMap<>();
+    for (int itemId : reconciledIds.stream().sorted().toList()) {
+      if (deadlineReached(job, deadlineNanos)) {
+        return null;
+      }
+      String identity = currentIdentities.get(itemId);
+      if (identity != null) {
+        reconciledSnapshots.put(
+            itemId,
+            new RetainedItemSnapshot(itemId, identity, currentTraceGeometries.get(itemId)));
+      }
+    }
+    RetainedCopper reconciled = retainedCopperFromSnapshots(reconciledSnapshots);
+    return reconciled.itemIds().size() == reconciledIds.size() ? reconciled : null;
+  }
+
+  private static Set<Integer> retainedTraceCoverageIds(
+      TraceGeometry retained,
+      List<TraceGeometry> candidates,
+      RoutingJob job,
+      long deadlineNanos) {
+    if (retained.corners().size() < 2 || candidates.isEmpty()) {
+      return Set.of();
+    }
+
+    Set<Integer> coveringIds = new LinkedHashSet<>();
+    for (int index = 0; index < retained.corners().size() - 1; index++) {
+      if (deadlineReached(job, deadlineNanos)) {
+        return Set.of();
+      }
+      FloatPoint start = retained.corners().get(index);
+      FloatPoint end = retained.corners().get(index + 1);
+      List<CoverageInterval> intervals = new ArrayList<>();
+      for (TraceGeometry candidate : candidates) {
+        if (deadlineReached(job, deadlineNanos)) {
+          return Set.of();
+        }
+        for (int candidateIndex = 0; candidateIndex < candidate.corners().size() - 1;
+            candidateIndex++) {
+          if (deadlineReached(job, deadlineNanos)) {
+            return Set.of();
+          }
+          CoverageInterval interval = coverageInterval(
+              start,
+              end,
+              candidate.corners().get(candidateIndex),
+              candidate.corners().get(candidateIndex + 1),
+              candidate.itemId());
+          if (interval != null) {
+            intervals.add(interval);
+          }
+        }
+      }
+      if (!intervalsCoverSegment(
+          intervals, coveringIds, retainedTraceParameterTolerance(start, end))) {
+        return Set.of();
+      }
+    }
+    return Set.copyOf(coveringIds);
+  }
+
+  private static boolean traceGeometryCoveredByUnion(
+      TraceGeometry subject,
+      List<TraceGeometry> capturedUnion,
+      RoutingJob job,
+      long deadlineNanos) {
+    if (subject.corners().size() < 2) {
+      return false;
+    }
+    for (int index = 0; index < subject.corners().size() - 1; index++) {
+      if (deadlineReached(job, deadlineNanos)) {
+        return false;
+      }
+      FloatPoint start = subject.corners().get(index);
+      FloatPoint end = subject.corners().get(index + 1);
+      List<CoverageInterval> intervals = new ArrayList<>();
+      for (TraceGeometry captured : capturedUnion) {
+        if (deadlineReached(job, deadlineNanos)) {
+          return false;
+        }
+        for (int capturedIndex = 0; capturedIndex < captured.corners().size() - 1;
+            capturedIndex++) {
+          if (deadlineReached(job, deadlineNanos)) {
+            return false;
+          }
+          CoverageInterval interval = coverageInterval(
+              start,
+              end,
+              captured.corners().get(capturedIndex),
+              captured.corners().get(capturedIndex + 1),
+              captured.itemId());
+          if (interval != null) {
+            intervals.add(interval);
+          }
+        }
+      }
+      if (!intervalsCoverSegment(
+          intervals, new HashSet<>(), retainedTraceParameterTolerance(start, end))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static CoverageInterval coverageInterval(
+      FloatPoint retainedStart,
+      FloatPoint retainedEnd,
+      FloatPoint candidateStart,
+      FloatPoint candidateEnd,
+      int candidateItemId) {
+    double dx = retainedEnd.x - retainedStart.x;
+    double dy = retainedEnd.y - retainedStart.y;
+    double lengthSquared = dx * dx + dy * dy;
+    double length = Math.sqrt(lengthSquared);
+    if (length <= RETAINED_TRACE_COORDINATE_EPSILON) {
+      return null;
+    }
+    if (distanceFromLine(retainedStart, dx, dy, length, candidateStart)
+            > RETAINED_TRACE_COORDINATE_EPSILON
+        || distanceFromLine(retainedStart, dx, dy, length, candidateEnd)
+            > RETAINED_TRACE_COORDINATE_EPSILON) {
+      return null;
+    }
+
+    double first = projectionParameter(retainedStart, dx, dy, lengthSquared, candidateStart);
+    double second = projectionParameter(retainedStart, dx, dy, lengthSquared, candidateEnd);
+    double overlapStart = Math.max(0.0, Math.min(first, second));
+    double overlapEnd = Math.min(1.0, Math.max(first, second));
+    if (overlapEnd - overlapStart <= retainedTraceParameterTolerance(length)) {
+      return null;
+    }
+    return new CoverageInterval(overlapStart, overlapEnd, candidateItemId);
+  }
+
+  private static double retainedTraceParameterTolerance(
+      FloatPoint start,
+      FloatPoint end) {
+    return retainedTraceParameterTolerance(start.distance(end));
+  }
+
+  private static double retainedTraceParameterTolerance(double segmentLength) {
+    if (!Double.isFinite(segmentLength) || segmentLength <= 0.0) {
+      return 1.0;
+    }
+    return Math.min(1.0, RETAINED_TRACE_COORDINATE_EPSILON / segmentLength);
+  }
+
+  private static double distanceFromLine(
+      FloatPoint lineStart,
+      double dx,
+      double dy,
+      double length,
+      FloatPoint point) {
+    double pointDx = point.x - lineStart.x;
+    double pointDy = point.y - lineStart.y;
+    return Math.abs(dx * pointDy - dy * pointDx) / length;
+  }
+
+  private static double projectionParameter(
+      FloatPoint lineStart,
+      double dx,
+      double dy,
+      double lengthSquared,
+      FloatPoint point) {
+    return ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / lengthSquared;
+  }
+
+  static boolean intervalsCoverSegment(
+      List<CoverageInterval> intervals,
+      Set<Integer> coveringIds,
+      double parameterTolerance) {
+    intervals.sort(Comparator
+        .comparingDouble(CoverageInterval::start)
+        .thenComparing(Comparator.comparingDouble(CoverageInterval::end).reversed())
+        .thenComparingInt(CoverageInterval::itemId));
+    double coveredThrough = 0.0;
+    int intervalIndex = 0;
+    while (coveredThrough < 1.0 - parameterTolerance) {
+      CoverageInterval best = null;
+      while (intervalIndex < intervals.size()
+          && intervals.get(intervalIndex).start() <= coveredThrough + parameterTolerance) {
+        CoverageInterval candidate = intervals.get(intervalIndex++);
+        if (candidate.end() <= coveredThrough + parameterTolerance) {
+          continue;
+        }
+        int endComparison = best == null ? 1 : Double.compare(candidate.end(), best.end());
+        if (best == null
+            || endComparison > 0
+            || (endComparison == 0 && candidate.itemId() < best.itemId())) {
+          best = candidate;
+        }
+      }
+      if (best == null) {
+        return false;
+      }
+      coveringIds.add(best.itemId());
+      coveredThrough = best.end();
+    }
+    return true;
+  }
+
+  private static String retainedCopperSignature(
+      Map<Integer, String> currentIdentities,
+      Set<Integer> retainedItemIds) {
+    Map<Integer, String> records = new java.util.TreeMap<>();
+    for (int itemId : retainedItemIds) {
+      String identity = currentIdentities.get(itemId);
+      if (identity != null) {
+        records.put(itemId, itemId + "|" + identity);
+      }
+    }
+    return String.join("\n", records.values());
+  }
+
   private static String retainedCopperSignature(RoutingBoard board, Set<Integer> retainedItemIds) {
     return String.join("\n", retainedCopperRecords(board, retainedItemIds).values());
   }
@@ -1264,8 +1724,11 @@ public final class RouterIntentObjectiveRefiner {
   }
 
   private static String copperRecord(Item item) {
+    return item.get_id_no() + "|" + copperIdentityRecord(item);
+  }
+
+  private static String copperIdentityRecord(Item item) {
     StringBuilder record = new StringBuilder()
-        .append(item.get_id_no()).append('|')
         .append(item.getClass().getSimpleName()).append('|')
         .append(item.get_fixed_state()).append('|')
         .append(item.clearance_class_no()).append('|');
@@ -1279,16 +1742,72 @@ public final class RouterIntentObjectiveRefiner {
       record.append('|').append(trace.get_layer()).append('|').append(trace.get_half_width());
       appendCorners(record, trace.polyline().corner_approx_arr());
     } else if (item instanceof Via via) {
-      record.append('|').append(via.get_center())
-          .append('|').append(via.first_layer()).append('-').append(via.last_layer());
+      FloatPoint center = via.get_center().to_float();
+      record.append('|').append(center.x).append(',').append(center.y)
+          .append('|').append(via.attach_allowed);
+      appendPadstackIdentity(record, via.get_padstack());
     } else if (item instanceof ConductionArea area) {
-      record.append('|').append(area.get_layer());
-      appendCorners(record, area.get_area().corner_approx_arr());
+      record.append('|').append(area.get_layer())
+          .append('|').append(area.get_is_obstacle())
+          .append('|').append(area.name);
+      appendAreaIdentity(record, area.get_area());
     } else {
       IntBox box = item.bounding_box();
       record.append('|').append(box == null ? "null" : box.toString());
     }
     return record.toString();
+  }
+
+  private static void appendPadstackIdentity(StringBuilder record, Padstack padstack) {
+    if (padstack == null) {
+      record.append("|padstack=null");
+      return;
+    }
+    record.append("|padstack=").append(padstack.name)
+        .append('|').append(padstack.no)
+        .append('|').append(padstack.attach_allowed)
+        .append('|').append(padstack.placed_absolute)
+        .append('|').append(padstack.from_layer()).append('-').append(padstack.to_layer())
+        .append('|').append(padstack.board_layer_count())
+        .append('|').append(padstack.get_drill_radius());
+    for (int layer = 0; layer < padstack.board_layer_count(); layer++) {
+      record.append("|layer=").append(layer);
+      appendShapeIdentity(record, padstack.get_shape(layer));
+    }
+  }
+
+  private static void appendAreaIdentity(StringBuilder record, Area area) {
+    if (area == null) {
+      record.append("|area=null");
+      return;
+    }
+    record.append("|area=").append(area.getClass().getSimpleName())
+        .append('|').append(area.is_empty())
+        .append('|').append(area.is_bounded())
+        .append('|').append(area.dimension());
+    record.append("|border");
+    appendShapeIdentity(record, area.get_border());
+    Shape[] holes = area.get_holes();
+    record.append("|holes=").append(holes == null ? 0 : holes.length);
+    if (holes != null) {
+      for (Shape hole : holes) {
+        appendShapeIdentity(record, hole);
+      }
+    }
+  }
+
+  private static void appendShapeIdentity(StringBuilder record, Shape shape) {
+    if (shape == null) {
+      record.append("|shape=null");
+      return;
+    }
+    IntBox box = shape.bounding_box();
+    record.append("|shape=").append(shape.getClass().getSimpleName())
+        .append('|').append(shape.dimension())
+        .append('|').append(shape.area())
+        .append('|').append(shape.circumference())
+        .append('|').append(box == null ? "null" : box.toString());
+    appendCorners(record, shape.corner_approx_arr());
   }
 
   private static void appendCorners(StringBuilder record, FloatPoint[] corners) {
